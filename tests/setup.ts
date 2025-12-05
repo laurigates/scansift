@@ -1,12 +1,12 @@
 /**
- * Global test setup for Vitest.
+ * Global test setup for Bun test runner.
  */
 
-import { beforeAll, afterAll, vi } from 'vitest';
+import { beforeAll, afterAll, mock } from 'bun:test';
 
 // Mock external dependencies that require native modules
-vi.mock('better-sqlite3');
-vi.mock('sharp');
+mock.module('better-sqlite3', () => ({}));
+mock.module('sharp', () => ({}));
 
 beforeAll(async () => {
   // Global test setup

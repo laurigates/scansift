@@ -10,9 +10,12 @@
 import Fastify from 'fastify';
 import fastifyStatic from '@fastify/static';
 import fastifyWebsocket from '@fastify/websocket';
-import { join } from 'node:path';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import pino from 'pino';
 import { SERVER } from '@shared/constants';
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
 
 const logger = pino({
   level: process.env.LOG_LEVEL ?? 'info',
@@ -32,7 +35,7 @@ const createApp = async () => {
 
   // Register static file serving (client build)
   await app.register(fastifyStatic, {
-    root: join(import.meta.dirname, '../../dist/client'),
+    root: join(__dirname, '../../dist/client'),
     prefix: '/',
   });
 

@@ -5,7 +5,7 @@ allowed-tools: ["Read", "Edit", "Bash", "Write", "TodoWrite"]
 
 Run TDD cycle:
 
-1. **Run test suite**: `pnpm test`
+1. **Run test suite**: `bun test`
 2. **If tests fail**:
    - Analyze failure output
    - Identify root cause
