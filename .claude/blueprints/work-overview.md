@@ -8,12 +8,17 @@
 - ✅ Project-specific skills generated
 - ✅ Workflow commands generated
 - ✅ TypeScript project structure initialized
+- ✅ Switched to Bun runtime (faster, built-in SQLite)
+- ✅ Phase 0: Validate eSCL with Epson ET-3750
+  - Scanner discovery via mDNS/Bonjour
+  - eSCL scan job creation and status polling
+  - Document download working (JPEG format)
+  - Verified: 100, 200, 300, 600, 1200 DPI resolutions
 
 ### In Progress
-- ⏳ Phase 0: Validate eSCL with Epson ET-3750
+- ⏳ Phase 0: Prototype photo detection algorithm
 
 ### Pending
-- ⏹️ Phase 0: Prototype photo detection algorithm
 - ⏹️ Phase 1: Core scanning infrastructure
 - ⏹️ Phase 2: Web interface & real-time feedback
 - ⏹️ Phase 3: Front/back pairing & processing pipeline
@@ -43,7 +48,16 @@ photoscan/
 ```
 
 ## Next Steps
-1. Install dependencies: `pnpm install`
-2. Validate eSCL scanner communication
-3. Test scanner discovery on local network
-4. Prototype photo detection algorithm
+1. Prototype photo detection algorithm using OpenCV or Sharp
+2. Implement contour detection for multiple photos on flatbed
+3. Test detection accuracy with various photo arrangements
+4. Begin Phase 1: Core scanning infrastructure
+
+## Scanner Commands
+```bash
+# Discover scanners on network
+bun run scanner:discover
+
+# Perform a test scan
+bun run scanner:test
+```
