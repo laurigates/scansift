@@ -18,6 +18,8 @@
     "test:integration": "bun test tests/integration",
     "test:e2e": "bunx playwright test",
     "test:e2e:ui": "bunx playwright test --ui",
+    "scanner:discover": "bun scripts/discover-scanners.ts",
+    "scanner:test": "bun scripts/test-scan.ts",
     "type-check": "tsc --noEmit",
     "lint": "eslint . --ext .ts,.tsx",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
