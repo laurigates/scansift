@@ -1,6 +1,19 @@
-# ScanSift
+<p align="center">
+  <img src="assets/icon-512.png" alt="ScanSift" width="128" height="128">
+</p>
 
-Network-enabled batch photo scanning application for digitizing physical photo collections.
+<h1 align="center">ScanSift</h1>
+
+<p align="center">
+  Network-enabled batch photo scanning application for digitizing physical photo collections.
+</p>
+
+<p align="center">
+  <a href="https://github.com/laurigates/scansift/blob/main/LICENSE"><img src="https://img.shields.io/github/license/laurigates/scansift" alt="License"></a>
+  <a href="https://github.com/laurigates/scansift"><img src="https://img.shields.io/github/stars/laurigates/scansift" alt="GitHub stars"></a>
+  <img src="https://img.shields.io/badge/runtime-Bun-f9f1e1" alt="Bun">
+  <img src="https://img.shields.io/badge/TypeScript-5.3-blue" alt="TypeScript">
+</p>
 
 ## Features
 
@@ -93,4 +106,4 @@ src/
 
 ## License
 
-MIT
+[MIT](LICENSE)
