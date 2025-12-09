@@ -7,13 +7,16 @@
  * - Static file serving for the client app
  */
 
-import Fastify from 'fastify';
-import fastifyStatic from '@fastify/static';
-import fastifyWebsocket from '@fastify/websocket';
-import { join, dirname } from 'node:path';
+import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import pino from 'pino';
+import fastifyStatic from '@fastify/static';
 import { SERVER } from '@shared/constants';
+import Fastify from 'fastify';
+import fastifySocketIO from 'fastify-socket.io';
+import pino from 'pino';
+import { registerRoutes } from './routes';
+import { createScanOrchestrator } from './services/scan-orchestrator';
+import { initializeSocketHandler } from './websocket/socket-handler';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
@@ -30,8 +33,13 @@ const createApp = async () => {
     logger: true,
   });
 
-  // Register WebSocket support
-  await app.register(fastifyWebsocket);
+  // Register Socket.IO support
+  await app.register(fastifySocketIO, {
+    cors: {
+      origin: '*',
+      methods: ['GET', 'POST'],
+    },
+  });
 
   // Register static file serving (client build)
   await app.register(fastifyStatic, {
@@ -39,18 +47,22 @@ const createApp = async () => {
     prefix: '/',
   });
 
+  // Create scan orchestrator instance and attach to app
+  const orchestrator = createScanOrchestrator({
+    outputDirectory: process.env.OUTPUT_DIR ?? './scanned-photos',
+    scanTimeout: 120000,
+  });
+  app.decorate('scanOrchestrator', orchestrator);
+
+  // Initialize Socket.IO handler with orchestrator
+  app.ready((err) => {
+    if (err) throw err;
+    initializeSocketHandler(app.io, orchestrator);
+  });
+
   // Health check endpoint
   app.get('/api/health', async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
-  });
-
-  // Scanner status endpoint (placeholder)
-  app.get('/api/scanner/status', async () => {
-    // TODO: Implement actual scanner discovery
-    return {
-      available: false,
-      message: 'Scanner discovery not yet implemented',
-    };
   });
 
   // Session stats endpoint (placeholder)
@@ -62,6 +74,9 @@ const createApp = async () => {
       sessionStartTime: new Date().toISOString(),
     };
   });
+
+  // Register all API routes (includes scan routes)
+  await registerRoutes(app);
 
   return app;
 };

@@ -1,19 +1,31 @@
+import type { GridPosition, ScannerStatus, ScanState, ServerEvent } from '@shared/types';
+import { io, type Socket } from 'socket.io-client';
 import { create } from 'zustand';
-import { io, Socket } from 'socket.io-client';
-import type { ScanState, ServerEvent } from '@shared/types';
+
+interface PhotoPreview {
+  position: GridPosition;
+  thumbnail: string; // base64
+  bounds: { width: number; height: number };
+  confidence: number;
+}
 
 interface ScanStore {
   state: ScanState;
   socket: Socket | null;
+  previews: PhotoPreview[];
   connect: () => void;
   disconnect: () => void;
   startScan: (type: 'front' | 'back') => Promise<void>;
+  skipBacks: () => Promise<void>;
+  checkScanner: () => Promise<ScannerStatus>;
+  clearPreviews: () => void;
   reset: () => void;
 }
 
 export const useScanStore = create<ScanStore>((set, get) => ({
   state: { status: 'idle' },
   socket: null,
+  previews: [],
 
   connect: () => {
     const existingSocket = get().socket;
@@ -84,6 +96,20 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       });
     });
 
+    socket.on(
+      'photos:detected',
+      (data: {
+        photos: Array<{
+          position: GridPosition;
+          thumbnail: string;
+          bounds: { width: number; height: number };
+          confidence: number;
+        }>;
+      }) => {
+        set({ previews: data.photos });
+      },
+    );
+
     set({ socket });
   },
 
@@ -96,7 +122,7 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   },
 
   startScan: async (type) => {
-    const { socket } = get();
+    const { socket, state } = get();
 
     if (!socket?.connected) {
       set({
@@ -109,17 +135,82 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       return;
     }
 
-    socket.emit('scan:start', { scanType: type });
+    // Emit scan:start with appropriate context
+    const payload =
+      type === 'back' && state.status === 'ready_for_backs'
+        ? { scanType: type, frontScanId: state.frontScanId }
+        : { scanType: type };
 
+    socket.emit('scan:start', payload);
+
+    // Update local state
+    if (type === 'front') {
+      set({
+        state: {
+          status: 'scanning_fronts',
+          scanId: 'pending',
+        },
+      });
+    } else if (state.status === 'ready_for_backs') {
+      set({
+        state: {
+          status: 'scanning_backs',
+          frontScanId: state.frontScanId,
+          backScanId: 'pending',
+        },
+      });
+    }
+  },
+
+  skipBacks: async () => {
+    const { socket, state } = get();
+
+    if (!socket?.connected) {
+      set({
+        state: {
+          status: 'error',
+          message: 'Not connected to server',
+          recoverable: true,
+        },
+      });
+      return;
+    }
+
+    if (state.status !== 'ready_for_backs') {
+      return;
+    }
+
+    // Set to saving state while server processes
     set({
       state: {
-        status: type === 'front' ? 'scanning_fronts' : 'scanning_backs',
-        scanId: 'pending',
-      } as ScanState,
+        status: 'saving',
+        batchId: state.frontScanId,
+      },
     });
+
+    // Emit skip-backs event
+    socket.emit('scan:skip-backs', { frontScanId: state.frontScanId });
+  },
+
+  checkScanner: async () => {
+    try {
+      const response = await fetch('/api/scanner/status');
+      if (!response.ok) {
+        throw new Error('Failed to fetch scanner status');
+      }
+      return (await response.json()) as ScannerStatus;
+    } catch (error) {
+      // eslint-disable-next-line no-console
+      console.error('Error checking scanner:', error);
+      return { available: false };
+    }
+  },
+
+  clearPreviews: () => {
+    set({ previews: [] });
   },
 
   reset: () => {
-    set({ state: { status: 'idle' } });
+    set({ state: { status: 'idle' }, previews: [] });
   },
 }));

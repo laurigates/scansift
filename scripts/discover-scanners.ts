@@ -59,7 +59,9 @@ const main = async () => {
       console.log(`      Resolutions: ${capabilities.supportedResolutions.join(', ')} DPI`);
       console.log(`      Color Modes: ${capabilities.colorModes.join(', ')}`);
       console.log(`      Formats: ${capabilities.documentFormats.join(', ')}`);
-      console.log(`      Max Size: ${capabilities.maxWidth}x${capabilities.maxHeight} (internal units)`);
+      console.log(
+        `      Max Size: ${capabilities.maxWidth}x${capabilities.maxHeight} (internal units)`,
+      );
     } else {
       console.log('   ⚠️  Could not fetch capabilities');
     }

@@ -1,6 +1,6 @@
-@tailwind base;
+/* @tailwind base;
 @tailwind components;
-@tailwind utilities;
+@tailwind utilities; */
 
 @layer base {
   html {
@@ -13,7 +13,7 @@
 
   /* Ensure touch targets are accessible */
   button,
-  [role='button'],
+  [role="button"],
   a {
     @apply min-h-touch min-w-touch;
   }

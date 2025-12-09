@@ -2,11 +2,11 @@
  * Global test setup for Bun test runner.
  */
 
-import { beforeAll, afterAll, mock } from 'bun:test';
+import { afterAll, beforeAll, mock } from 'bun:test';
 
 // Mock external dependencies that require native modules
+// Note: sharp is NOT mocked because we need it for image processing tests
 mock.module('better-sqlite3', () => ({}));
-mock.module('sharp', () => ({}));
 
 beforeAll(async () => {
   // Global test setup

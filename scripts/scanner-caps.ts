@@ -3,10 +3,7 @@
  * Get full scanner capabilities
  */
 
-import {
-  discoverScanners,
-  type DiscoveredScanner,
-} from '../src/server/services/scanner/discovery';
+import { type DiscoveredScanner, discoverScanners } from '../src/server/services/scanner/discovery';
 
 const getScannerBaseUrl = (scanner: DiscoveredScanner): string => {
   const host = scanner.addresses[0] || scanner.host;

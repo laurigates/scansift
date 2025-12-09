@@ -5,8 +5,8 @@
  * eSCL (AirPrint Scan) is an HTTP-based protocol that works with most modern scanners.
  */
 
-import Bonjour, { type Service } from 'bonjour-service';
 import { PERFORMANCE } from '@shared/constants';
+import Bonjour, { type Service } from 'bonjour-service';
 
 export interface DiscoveredScanner {
   name: string;
@@ -34,7 +34,7 @@ export interface ScannerCapabilities {
  * Uses mDNS to find devices advertising the '_uscan._tcp' service.
  */
 export const discoverScanners = async (
-  timeoutMs: number = PERFORMANCE.DISCOVERY_TIMEOUT_MS
+  timeoutMs: number = PERFORMANCE.DISCOVERY_TIMEOUT_MS,
 ): Promise<DiscoveredScanner[]> => {
   const bonjour = new Bonjour();
   const scanners: DiscoveredScanner[] = [];
@@ -80,7 +80,7 @@ export const discoverScanners = async (
  * Queries /eSCL/ScannerCapabilities endpoint.
  */
 export const getScannerCapabilities = async (
-  scanner: DiscoveredScanner
+  scanner: DiscoveredScanner,
 ): Promise<ScannerCapabilities | null> => {
   const baseUrl = `http://${scanner.addresses[0] || scanner.host}:${scanner.port}`;
 
@@ -114,9 +114,10 @@ const parseCapabilitiesXML = (xml: string): ScannerCapabilities => {
   const extractAllValues = (tag: string): string[] => {
     const regex = new RegExp(`<[^:]*:?${tag}>([^<]+)<`, 'gi');
     const matches: string[] = [];
-    let match;
+    let match: RegExpExecArray | null;
+    // biome-ignore lint/suspicious/noAssignInExpressions: Necessary for regex.exec() loop pattern
     while ((match = regex.exec(xml)) !== null) {
-      matches.push(match[1]);
+      matches.push(match[1] || '');
     }
     return matches;
   };
@@ -124,12 +125,13 @@ const parseCapabilitiesXML = (xml: string): ScannerCapabilities => {
   // Extract resolutions (look for XResolution values)
   const resolutions = extractAllValues('XResolution')
     .map(Number)
-    .filter((n) => !isNaN(n) && n > 0);
+    .filter((n) => !Number.isNaN(n) && n > 0);
 
-  return {
+  const makeAndModel = extractValue('MakeAndModel');
+  const serialNumber = extractValue('SerialNumber');
+
+  const result: ScannerCapabilities = {
     version: extractValue('Version') || '2.0',
-    makeAndModel: extractValue('MakeAndModel'),
-    serialNumber: extractValue('SerialNumber'),
     minWidth: Number(extractValue('MinWidth')) || 0,
     maxWidth: Number(extractValue('MaxWidth')) || 8500, // ~8.5 inches at 1000 DPI
     minHeight: Number(extractValue('MinHeight')) || 0,
@@ -138,13 +140,22 @@ const parseCapabilitiesXML = (xml: string): ScannerCapabilities => {
     colorModes: extractAllValues('ColorMode'),
     documentFormats: extractAllValues('DocumentFormat'),
   };
+
+  if (makeAndModel) {
+    result.makeAndModel = makeAndModel;
+  }
+  if (serialNumber) {
+    result.serialNumber = serialNumber;
+  }
+
+  return result;
 };
 
 /**
  * Get scanner status using eSCL protocol.
  */
 export const getScannerStatus = async (
-  scanner: DiscoveredScanner
+  scanner: DiscoveredScanner,
 ): Promise<{ state: string; adfState?: string } | null> => {
   const baseUrl = `http://${scanner.addresses[0] || scanner.host}:${scanner.port}`;
 
@@ -161,10 +172,15 @@ export const getScannerStatus = async (
     const stateMatch = xml.match(/<[^:]*:?State>([^<]+)</i);
     const adfStateMatch = xml.match(/<[^:]*:?AdfState>([^<]+)</i);
 
-    return {
+    const result: { state: string; adfState?: string } = {
       state: stateMatch?.[1] || 'Unknown',
-      adfState: adfStateMatch?.[1],
     };
+
+    if (adfStateMatch?.[1]) {
+      result.adfState = adfStateMatch[1];
+    }
+
+    return result;
   } catch {
     return null;
   }

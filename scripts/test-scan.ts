@@ -9,10 +9,7 @@
 
 import { mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import {
-  discoverScanners,
-  type DiscoveredScanner,
-} from '../src/server/services/scanner/discovery';
+import { type DiscoveredScanner, discoverScanners } from '../src/server/services/scanner/discovery';
 
 const TMP_DIR = join(import.meta.dir, '../tmp');
 
@@ -61,7 +58,7 @@ const getScannerBaseUrl = (scanner: DiscoveredScanner): string => {
  */
 const initiateScan = async (
   scanner: DiscoveredScanner,
-  resolution: ValidResolution = 300
+  resolution: ValidResolution = 300,
 ): Promise<ScanJobResult> => {
   const baseUrl = getScannerBaseUrl(scanner);
   const settings = buildScanSettings(resolution);
@@ -123,7 +120,7 @@ const initiateScan = async (
 const waitForScanComplete = async (
   _jobUrl: string,
   scanner: DiscoveredScanner,
-  timeoutMs: number = 60000
+  timeoutMs: number = 60000,
 ): Promise<boolean> => {
   const startTime = Date.now();
   const baseUrl = getScannerBaseUrl(scanner);
@@ -173,10 +170,7 @@ const waitForScanComplete = async (
 /**
  * Download the scanned image using curl (more compatible with scanner encoding)
  */
-const downloadScan = async (
-  jobUrl: string,
-  outputPath: string
-): Promise<boolean> => {
+const downloadScan = async (jobUrl: string, outputPath: string): Promise<boolean> => {
   const documentUrl = `${jobUrl}/NextDocument`;
 
   console.log(`📥 Downloading scan from ${documentUrl}...`);
@@ -262,7 +256,7 @@ const main = async () => {
     process.exit(1);
   }
 
-  console.log('\n' + '═'.repeat(60));
+  console.log(`\n${'═'.repeat(60)}`);
   console.log('✨ Test scan completed successfully!');
   console.log('═'.repeat(60));
   console.log('\neSCL communication with your scanner is working correctly.');

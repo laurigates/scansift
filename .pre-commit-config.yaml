@@ -1,0 +1,40 @@
+# FVH Standards v2025.1 - Frontend (Biome)
+# See: https://pre-commit.com for more information
+default_install_hook_types:
+  - pre-commit
+  - commit-msg
+
+repos:
+  # Base hooks for all projects
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: ["--maxkb=1000"]
+
+  # Conventional commits
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.0.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+
+  # Biome - formatting and linting (replaces ESLint + Prettier)
+  - repo: https://github.com/biomejs/pre-commit
+    rev: v2.0.0
+    hooks:
+      - id: biome-check
+        additional_dependencies: ["@biomejs/biome@2.3.8"]
+
+  # Secret detection
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ["--baseline", ".secrets.baseline"]
+        exclude: package-lock\.json|bun\.lock

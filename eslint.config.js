@@ -19,6 +19,10 @@ export default [
           jsx: true,
         },
       },
+      globals: {
+        Buffer: 'readonly',
+        performance: 'readonly',
+      },
     },
     plugins: {
       '@typescript-eslint': tseslint,

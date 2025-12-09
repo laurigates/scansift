@@ -1,23 +1,14 @@
-import { describe, it, expect } from 'bun:test';
-import {
-  DETECTION_CONFIG,
-  SCAN_DEFAULTS,
-  PERFORMANCE,
-  MAX_PHOTOS_PER_BATCH,
-} from './constants';
+import { describe, expect, it } from 'bun:test';
+import { DETECTION_CONFIG, MAX_PHOTOS_PER_BATCH, PERFORMANCE, SCAN_DEFAULTS } from './constants';
 
 describe('constants', () => {
   describe('DETECTION_CONFIG', () => {
     it('has valid photo size constraints', () => {
-      expect(DETECTION_CONFIG.MIN_PHOTO_SIZE).toBeLessThan(
-        DETECTION_CONFIG.MAX_PHOTO_SIZE
-      );
+      expect(DETECTION_CONFIG.MIN_PHOTO_SIZE).toBeLessThan(DETECTION_CONFIG.MAX_PHOTO_SIZE);
     });
 
     it('has valid Canny thresholds', () => {
-      expect(DETECTION_CONFIG.CANNY_LOW).toBeLessThan(
-        DETECTION_CONFIG.CANNY_HIGH
-      );
+      expect(DETECTION_CONFIG.CANNY_LOW).toBeLessThan(DETECTION_CONFIG.CANNY_HIGH);
     });
   });
 

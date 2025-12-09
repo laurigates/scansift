@@ -7,7 +7,7 @@ export class AppError extends Error {
   constructor(
     message: string,
     public readonly code: string,
-    public readonly recoverable: boolean = false
+    public readonly recoverable: boolean = false,
   ) {
     super(message);
     this.name = 'AppError';
@@ -24,7 +24,7 @@ export class ScannerError extends AppError {
 export class DetectionError extends AppError {
   constructor(
     message: string,
-    public readonly photosDetected: number
+    public readonly photosDetected: number,
   ) {
     super(message, 'DETECTION_ERROR', true);
     this.name = 'DetectionError';
@@ -56,8 +56,7 @@ export const USER_ERROR_MESSAGES: Record<string, string> = {
     'Could not detect photos in the scan. Try adjusting photo placement or scanning again.',
   PROCESSING_ERROR:
     'An error occurred while processing the photo. The original scan has been saved.',
-  STORAGE_ERROR:
-    'Not enough disk space to save photos. Free up space and try again.',
+  STORAGE_ERROR: 'Not enough disk space to save photos. Free up space and try again.',
 };
 
 /**
