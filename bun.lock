@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "photoscan",
+      "name": "scansift",
       "dependencies": {
         "@fastify/static": "^7.0.0",
         "@fastify/websocket": "^10.0.0",
