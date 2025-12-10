@@ -11,10 +11,11 @@ import { registerScanRoutes } from './scan-routes';
  * Register all application routes
  */
 export const registerRoutes = async (app: FastifyInstance) => {
+  // Health check endpoint for container orchestration
+  app.get('/api/health', async () => {
+    return { status: 'ok', timestamp: new Date().toISOString() };
+  });
+
   // Register scan routes
   await registerScanRoutes(app);
-
-  // Future routes can be added here:
-  // await registerStatsRoutes(app);
-  // await registerWebSocketRoutes(app);
 };

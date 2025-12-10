@@ -1,0 +1,68 @@
+# Git
+.git
+.gitignore
+
+# CI/CD
+.github
+.gitlab-ci.yml
+
+# IDE
+.idea
+.vscode
+*.swp
+*.swo
+
+# Dependencies (rebuilt in container)
+node_modules
+
+# Build artifacts (rebuilt in container)
+dist
+build
+
+# Test and coverage
+coverage
+.coverage
+.nyc_output
+*.lcov
+
+# Playwright
+test-results
+playwright-report
+playwright/.cache
+
+# Documentation
+docs
+*.md
+!README.md
+
+# Environment
+.env
+.env.*
+*.local
+
+# Temporary
+tmp
+temp
+*.tmp
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Claude/AI config
+.claude
+CLAUDE.md
+
+# Pre-commit
+.pre-commit-config.yaml
+
+# TypeScript build info
+*.tsbuildinfo
+
+# Biome
+biome.json
+
+# ESLint
+.eslintrc*
+eslint.config.*
