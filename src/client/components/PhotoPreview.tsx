@@ -146,7 +146,7 @@ const PhotoCard = ({ photo, position, onViewFull }: PhotoCardProps) => {
           className="fixed inset-0 z-50 bg-black bg-opacity-90 flex items-center justify-center p-4"
           onClick={handleCloseLightbox}
           onKeyDown={(e) => {
-            if (e.key === 'Escape') handleCloseLightbox();
+            if (e.key === 'Escape') setShowLightbox(false);
           }}
           role="dialog"
           aria-modal="true"
