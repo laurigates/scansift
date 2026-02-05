@@ -1,0 +1,56 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "mcp__*",
+      "Bash(bun *)",
+      "Bash(npm run *)",
+      "Bash(npx *)",
+      "Bash(git *)",
+      "Bash(gh *)",
+      "Bash(docker *)",
+      "Bash(docker-compose *)",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Task(*)",
+      "WebFetch(*)",
+      "WebSearch(*)"
+    ],
+    "deny": [
+      "Bash(rm -rf /)",
+      "Bash(rm -rf ~)",
+      "Read(.env.local)",
+      "Read(./secrets/**)",
+      "Edit(.env.local)",
+      "Edit(./secrets/**)"
+    ]
+  },
+  "extraKnownMarketplaces": {
+    "laurigates-claude-plugins": {
+      "source": {
+        "source": "github",
+        "repo": "laurigates/claude-plugins"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "typescript-plugin@laurigates-claude-plugins": true,
+    "testing-plugin@laurigates-claude-plugins": true,
+    "code-quality-plugin@laurigates-claude-plugins": true,
+    "git-plugin@laurigates-claude-plugins": true,
+    "container-plugin@laurigates-claude-plugins": true,
+    "github-actions-plugin@laurigates-claude-plugins": true,
+    "configure-plugin@laurigates-claude-plugins": true,
+    "api-plugin@laurigates-claude-plugins": true,
+    "documentation-plugin@laurigates-claude-plugins": true,
+    "tools-plugin@laurigates-claude-plugins": true,
+    "hooks-plugin@laurigates-claude-plugins": true,
+    "project-plugin@laurigates-claude-plugins": true,
+    "blueprint-plugin@laurigates-claude-plugins": true,
+    "agents-plugin@laurigates-claude-plugins": true,
+    "accessibility-plugin@laurigates-claude-plugins": true
+  }
+}

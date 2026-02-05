@@ -128,6 +128,9 @@ export function pairPhotos(fronts: CroppedPhoto[], backs: CroppedPhoto[]): Pairi
 
     // Use first front if duplicates exist (guaranteed to exist based on loop logic)
     const front = frontsAtPosition[0];
+    if (!front) {
+      continue; // Should never happen, but satisfies TypeScript
+    }
 
     // Use first back if duplicates exist, or undefined if no back
     const back = backsAtPosition?.[0];

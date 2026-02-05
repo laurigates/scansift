@@ -9,7 +9,7 @@
 
 import sharp from 'sharp';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
-import type { ScanState } from '@/shared/types';
+import type { ScanState, ServerEvent } from '@/shared/types';
 import type { ScanOrchestrator } from '../services/scan-orchestrator';
 
 /**
