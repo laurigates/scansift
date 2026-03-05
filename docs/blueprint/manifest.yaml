@@ -1,0 +1,65 @@
+project:
+  name: ScanSift
+  description: >
+    Network-enabled batch photo scanning application for digitizing physical
+    photo collections. Scans up to 4 photos at once from a flatbed scanner,
+    auto-detects and crops individual photos, pairs fronts with backs, and
+    extracts OCR metadata from photo backs.
+  repository: https://github.com/laurigates/scansift
+  license: MIT
+  status: active
+
+runtime:
+  engine: Bun
+  language: TypeScript
+  strict: true
+
+stack:
+  server: Fastify
+  client: React 18 + Vite
+  database: SQLite (Drizzle ORM)
+  state: Zustand
+  styling: Tailwind CSS + Radix UI
+  realtime: Socket.IO
+  image_processing:
+    - Sharp
+    - OpenCV.js (@techstark/opencv-js)
+    - Tesseract.js
+  scanner_protocol: eSCL (mDNS/Bonjour discovery)
+
+toolchain:
+  linter_formatter: Biome 2.3.8
+  test_unit: bun test
+  test_e2e: Playwright
+  ci: GitHub Actions
+  container: Docker (multi-stage bun:alpine, published to GHCR)
+  releases: release-please
+
+documents:
+  - id: PRD-001
+    type: prd
+    title: ScanSift Product Requirements
+    file: PRD.md
+    status: accepted
+    created: 2026-03-05
+
+  - id: ADR-001
+    type: adr
+    title: Runtime and Framework Selection (Bun + Fastify + React)
+    file: ADR-001-runtime-and-framework.md
+    status: accepted
+    created: 2026-03-05
+
+  - id: ADR-002
+    type: adr
+    title: Image Processing Pipeline (Sharp + OpenCV.js + Tesseract.js)
+    file: ADR-002-image-processing-pipeline.md
+    status: accepted
+    created: 2026-03-05
+
+  - id: ADR-003
+    type: adr
+    title: Biome Toolchain (replacing ESLint + Prettier)
+    file: ADR-003-biome-toolchain.md
+    status: accepted
+    created: 2026-03-05
