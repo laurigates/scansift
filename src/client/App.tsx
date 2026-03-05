@@ -74,7 +74,6 @@ export const App = () => {
                     <PhotoPreview
                       photos={previews}
                       onViewFull={(position) => {
-                        // eslint-disable-next-line no-console
                         console.log('Viewing full size photo at position:', position);
                       }}
                     />

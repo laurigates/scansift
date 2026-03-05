@@ -39,12 +39,10 @@ export const useScanStore = create<ScanStore>((set, get) => ({
     });
 
     socket.on('connect', () => {
-      // eslint-disable-next-line no-console
       console.log('Connected to server');
     });
 
     socket.on('disconnect', () => {
-      // eslint-disable-next-line no-console
       console.log('Disconnected from server');
     });
 
@@ -200,7 +198,6 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       }
       return (await response.json()) as ScannerStatus;
     } catch (error) {
-      // eslint-disable-next-line no-console
       console.error('Error checking scanner:', error);
       return { available: false };
     }
