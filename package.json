@@ -57,7 +57,7 @@
     "@biomejs/biome": "2.3.8",
     "@happy-dom/global-registrator": "^13.3.8",
     "@playwright/test": "^1.41.0",
-    "@testing-library/react": "^14.1.2",
+    "@testing-library/react": "^16.3.2",
     "@types/bun": "latest",
     "@types/react": "^18.2.48",
     "@types/react-dom": "^18.2.18",
