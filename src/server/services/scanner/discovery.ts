@@ -7,6 +7,7 @@
 
 import { PERFORMANCE } from '@shared/constants';
 import Bonjour, { type Service } from 'bonjour-service';
+import { logger } from '../../logger';
 
 export interface DiscoveredScanner {
   name: string;
@@ -59,11 +60,11 @@ export const discoverScanners = async (
         txt,
       });
 
-      console.log(`Found scanner: ${service.name} at ${service.host}:${service.port}`);
+      logger.info({ name: service.name, host: service.host, port: service.port }, 'Found scanner');
     });
 
     browser.on('down', (service: Service) => {
-      console.log(`Scanner went offline: ${service.name}`);
+      logger.info({ name: service.name }, 'Scanner went offline');
     });
 
     // Stop discovery after timeout
@@ -88,14 +89,14 @@ export const getScannerCapabilities = async (
     const response = await fetch(`${baseUrl}/eSCL/ScannerCapabilities`);
 
     if (!response.ok) {
-      console.error(`Failed to get capabilities: ${response.status}`);
+      logger.error({ status: response.status }, 'Failed to get capabilities');
       return null;
     }
 
     const xml = await response.text();
     return parseCapabilitiesXML(xml);
   } catch (error) {
-    console.error(`Error fetching capabilities: ${error}`);
+    logger.error({ err: error }, 'Error fetching capabilities');
     return null;
   }
 };

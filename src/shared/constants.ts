@@ -60,3 +60,35 @@ export const SERVER = {
 
 // Maximum photos per batch
 export const MAX_PHOTOS_PER_BATCH = 4;
+
+// Scan timeouts
+export const TIMEOUTS = {
+  /** Default scan timeout in milliseconds (2 minutes) */
+  SCAN_TIMEOUT_MS: 120_000,
+  /** Scanner discovery timeout for route endpoints (10 seconds) */
+  ROUTE_DISCOVERY_TIMEOUT_MS: 10_000,
+  /** Quick scanner ready check timeout (5 seconds) */
+  QUICK_DISCOVERY_TIMEOUT_MS: 5_000,
+} as const;
+
+// Scan progress stage weights (must sum to 100)
+export const PROGRESS_WEIGHTS = {
+  /** Initiating stage: 0-10% */
+  INITIATING: 0.1,
+  /** Scanning stage: 10-80% */
+  SCANNING: 0.7,
+  /** Scanning stage start offset */
+  SCANNING_OFFSET: 10,
+  /** Downloading stage: 80-100% */
+  DOWNLOADING: 0.2,
+  /** Downloading stage start offset */
+  DOWNLOADING_OFFSET: 80,
+  /** Detection complete progress */
+  DETECTION_COMPLETE: 30,
+  /** Enhancement complete progress */
+  ENHANCEMENT_COMPLETE: 60,
+} as const;
+
+// Valid scan resolutions
+export const VALID_RESOLUTIONS = [300, 600] as const;
+export type ScanResolution = (typeof VALID_RESOLUTIONS)[number];
