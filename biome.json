@@ -29,6 +29,13 @@
       "indentWidth": 2
     }
   },
+  "linter": {
+    "rules": {
+      "suspicious": {
+        "noUnknownAtRules": "off"
+      }
+    }
+  },
   "css": {
     "parser": {
       "cssModules": true,

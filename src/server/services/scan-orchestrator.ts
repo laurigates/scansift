@@ -16,6 +16,7 @@ import { randomUUID } from 'node:crypto';
 import { EventEmitter } from 'node:events';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
+import { PROGRESS_WEIGHTS, TIMEOUTS } from '@shared/constants';
 import sharp from 'sharp';
 // Import types
 import type {
@@ -29,6 +30,7 @@ import type {
 } from '@/shared/types';
 import { detectPhotos } from '../detection/photo-detector';
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
+import { logger } from '../logger';
 import { enhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 // Import existing modules
 import {
@@ -65,11 +67,6 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
 const DEFAULT_OUTPUT_DIR = './scanned-photos';
 
 /**
- * Default scan timeout in milliseconds (2 minutes)
- */
-const DEFAULT_SCAN_TIMEOUT = 120000;
-
-/**
  * Scan Orchestrator Service
  *
  * Manages the complete scanning workflow with state tracking and event emission.
@@ -77,14 +74,14 @@ const DEFAULT_SCAN_TIMEOUT = 120000;
 export class ScanOrchestrator extends EventEmitter {
   private state: ScanState = { status: 'idle' };
   private currentScanner: DiscoveredScanner | null = null;
-  public frontScanResult: ScanResult | null = null;
+  private _frontScanResult: ScanResult | null = null;
   private backScanResult: ScanResult | null = null;
   private scanTimeout: number;
   private outputDirectory: string;
 
   constructor(options?: { scanTimeout?: number; outputDirectory?: string }) {
     super();
-    this.scanTimeout = options?.scanTimeout ?? DEFAULT_SCAN_TIMEOUT;
+    this.scanTimeout = options?.scanTimeout ?? TIMEOUTS.SCAN_TIMEOUT_MS;
     this.outputDirectory = options?.outputDirectory ?? DEFAULT_OUTPUT_DIR;
   }
 
@@ -96,11 +93,18 @@ export class ScanOrchestrator extends EventEmitter {
   }
 
   /**
+   * Get current front scan result (read-only access)
+   */
+  getFrontScanResult(): ScanResult | null {
+    return this._frontScanResult;
+  }
+
+  /**
    * Check if scanner is ready
    */
   async isScannerReady(): Promise<boolean> {
     try {
-      const scanners = await discoverScanners(5000); // Quick 5s discovery
+      const scanners = await discoverScanners(TIMEOUTS.QUICK_DISCOVERY_TIMEOUT_MS);
       this.currentScanner = scanners[0] ?? null;
       return this.currentScanner !== null;
     } catch {
@@ -133,7 +137,7 @@ export class ScanOrchestrator extends EventEmitter {
       // Discover scanner
       const scanner = await this.ensureScanner();
 
-      // Perform scan (placeholder - actual eSCL implementation would go here)
+      // Perform scan
       const rawImage = await this.performScan(scanner, mergedOptions, scanId, 'front');
 
       // Save raw scan
@@ -147,14 +151,14 @@ export class ScanOrchestrator extends EventEmitter {
       });
 
       // Detect photos
-      this.emit('scan:progress', scanId, 30);
+      this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.DETECTION_COMPLETE);
       const detectionResult = await detectPhotos(rawImage, mergedOptions.resolution);
 
       if (detectionResult.photos.length === 0) {
         throw new DetectionError('No photos detected in scan', 0);
       }
 
-      this.emit('scan:progress', scanId, 60);
+      this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.ENHANCEMENT_COMPLETE);
 
       // Crop and enhance photos
       const detectedPhotos = await this.cropAndEnhancePhotos(
@@ -175,7 +179,7 @@ export class ScanOrchestrator extends EventEmitter {
       };
 
       // Store for later pairing
-      this.frontScanResult = scanResult;
+      this._frontScanResult = scanResult;
 
       // Update state to ready for backs
       this.updateState({
@@ -211,7 +215,7 @@ export class ScanOrchestrator extends EventEmitter {
       );
     }
 
-    if (!this.frontScanResult) {
+    if (!this._frontScanResult) {
       throw new Error('No front scan result available');
     }
 
@@ -222,7 +226,7 @@ export class ScanOrchestrator extends EventEmitter {
       // Update state to scanning backs
       this.updateState({
         status: 'scanning_backs',
-        frontScanId: this.frontScanResult.scanId,
+        frontScanId: this._frontScanResult.scanId,
         backScanId: scanId,
       });
       this.emit('scan:started', scanId, 'back');
@@ -239,20 +243,20 @@ export class ScanOrchestrator extends EventEmitter {
       // Update state to processing
       this.updateState({
         status: 'processing_backs',
-        frontScanId: this.frontScanResult.scanId,
+        frontScanId: this._frontScanResult.scanId,
         backScanId: scanId,
         progress: 0,
       });
 
       // Detect photos
-      this.emit('scan:progress', scanId, 30);
+      this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.DETECTION_COMPLETE);
       const detectionResult = await detectPhotos(rawImage, mergedOptions.resolution);
 
       if (detectionResult.photos.length === 0) {
         throw new DetectionError('No photos detected in back scan', 0);
       }
 
-      this.emit('scan:progress', scanId, 60);
+      this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.ENHANCEMENT_COMPLETE);
 
       // Crop and enhance photos
       const detectedPhotos = await this.cropAndEnhancePhotos(
@@ -280,8 +284,8 @@ export class ScanOrchestrator extends EventEmitter {
       // Automatically transition to ready state (user will call completeBatch)
       this.updateState({
         status: 'ready_for_backs',
-        frontScanId: this.frontScanResult.scanId,
-        photosDetected: this.frontScanResult.photosDetected,
+        frontScanId: this._frontScanResult.scanId,
+        photosDetected: this._frontScanResult.photosDetected,
       });
 
       return scanResult;
@@ -298,7 +302,7 @@ export class ScanOrchestrator extends EventEmitter {
    * @throws Error if no front scan available
    */
   async completeBatch(): Promise<BatchResult> {
-    if (!this.frontScanResult) {
+    if (!this._frontScanResult) {
       throw new Error('No front scan result available to complete batch');
     }
 
@@ -310,7 +314,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Pair photos
       const pairs = this.pairPhotos(
-        this.frontScanResult.detectedPhotos,
+        this._frontScanResult.detectedPhotos,
         this.backScanResult?.detectedPhotos ?? [],
       );
 
@@ -330,7 +334,7 @@ export class ScanOrchestrator extends EventEmitter {
         batchId,
         pairsSaved: savedCount,
         totalPhotos:
-          this.frontScanResult.photosDetected + (this.backScanResult?.photosDetected ?? 0),
+          this._frontScanResult.photosDetected + (this.backScanResult?.photosDetected ?? 0),
         outputDirectory: batchDir,
         timestamp: new Date(),
       };
@@ -358,7 +362,7 @@ export class ScanOrchestrator extends EventEmitter {
    * Reset orchestrator to idle state
    */
   reset(): void {
-    this.frontScanResult = null;
+    this._frontScanResult = null;
     this.backScanResult = null;
     this.updateState({ status: 'idle' });
   }
@@ -425,20 +429,26 @@ export class ScanOrchestrator extends EventEmitter {
     scanId: string,
     type: 'front' | 'back',
   ): Promise<Buffer> {
-    console.log(`[${scanId}] Scanning ${type} with ${scanner.name} at ${options.resolution}dpi`);
+    logger.info(
+      { scanId, type, scanner: scanner.name, resolution: options.resolution },
+      'Starting scan',
+    );
 
     // Progress callback that maps eSCL stages to overall progress
     const progressCallback: ScanProgressCallback = (stage, progress) => {
       let overallProgress = 0;
       switch (stage) {
         case 'initiating':
-          overallProgress = Math.round(progress * 0.1); // 0-10%
+          overallProgress = Math.round(progress * PROGRESS_WEIGHTS.INITIATING);
           break;
         case 'scanning':
-          overallProgress = 10 + Math.round(progress * 0.7); // 10-80%
+          overallProgress =
+            PROGRESS_WEIGHTS.SCANNING_OFFSET + Math.round(progress * PROGRESS_WEIGHTS.SCANNING);
           break;
         case 'downloading':
-          overallProgress = 80 + Math.round(progress * 0.2); // 80-100%
+          overallProgress =
+            PROGRESS_WEIGHTS.DOWNLOADING_OFFSET +
+            Math.round(progress * PROGRESS_WEIGHTS.DOWNLOADING);
           break;
       }
       this.emit('scan:progress', scanId, overallProgress);
@@ -447,7 +457,7 @@ export class ScanOrchestrator extends EventEmitter {
     // Perform the actual scan using eSCL protocol
     const imageBuffer = await esclPerformScan(scanner, options, this.scanTimeout, progressCallback);
 
-    console.log(`[${scanId}] Scan complete: ${(imageBuffer.length / 1024 / 1024).toFixed(2)} MB`);
+    logger.info({ scanId, sizeMB: (imageBuffer.length / 1024 / 1024).toFixed(2) }, 'Scan complete');
 
     return imageBuffer;
   }
@@ -501,7 +511,7 @@ export class ScanOrchestrator extends EventEmitter {
           image: enhanced.buffer,
         });
       } catch (error) {
-        console.error(`Failed to process photo at ${photo.position}:`, error);
+        logger.error({ position: photo.position, err: error }, 'Failed to process photo');
         throw new ProcessingError(`Failed to enhance photo at ${photo.position}`);
       }
     }
@@ -511,9 +521,6 @@ export class ScanOrchestrator extends EventEmitter {
 
   /**
    * Pair front and back photos by grid position
-   *
-   * PLACEHOLDER: Simple position-based pairing
-   * Production version could use image matching algorithms
    */
   private pairPhotos(fronts: DetectedPhoto[], backs: DetectedPhoto[]): PhotoPair[] {
     const pairs: PhotoPair[] = [];
@@ -571,7 +578,7 @@ export class ScanOrchestrator extends EventEmitter {
         await writeFile(backPath, pair.back.image);
       }
 
-      console.log(`Saved pair ${index + 1} to ${outputDir}`);
+      logger.debug({ index: index + 1, outputDir }, 'Saved photo pair');
     } catch (error) {
       throw new StorageError(
         `Failed to save photo pair: ${error instanceof Error ? error.message : String(error)}`,

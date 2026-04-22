@@ -10,23 +10,15 @@
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
-import { SERVER } from '@shared/constants';
+import { SERVER, TIMEOUTS } from '@shared/constants';
 import Fastify from 'fastify';
 import fastifySocketIO from 'fastify-socket.io';
-import pino from 'pino';
+import { logger } from './logger';
 import { registerRoutes } from './routes';
 import { createScanOrchestrator } from './services/scan-orchestrator';
 import { initializeSocketHandler } from './websocket/socket-handler';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-
-const logger = pino({
-  level: process.env.LOG_LEVEL ?? 'info',
-  transport: {
-    target: 'pino-pretty',
-    options: { colorize: true },
-  },
-});
 
 const createApp = async () => {
   const app = Fastify({
@@ -50,7 +42,7 @@ const createApp = async () => {
   // Create scan orchestrator instance and attach to app
   const orchestrator = createScanOrchestrator({
     outputDirectory: process.env.OUTPUT_DIR ?? './scanned-photos',
-    scanTimeout: 120000,
+    scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
   });
   app.decorate('scanOrchestrator', orchestrator);
 

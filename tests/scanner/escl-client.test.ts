@@ -7,10 +7,12 @@ import { afterEach, describe, expect, mock, test } from 'bun:test';
 import type { DiscoveredScanner } from '../../src/server/services/scanner/discovery';
 import {
   buildScanSettings,
+  cancelScanJob,
   createScanJob,
   getScannerBaseUrl,
   VALID_RESOLUTIONS,
   type ValidResolution,
+  waitForScanReady,
 } from '../../src/server/services/scanner/escl-client';
 
 // Mock scanner for testing
@@ -134,6 +136,256 @@ describe('eSCL Client', () => {
     test('resolutions are sorted ascending', () => {
       const sorted = [...VALID_RESOLUTIONS].sort((a, b) => a - b);
       expect(VALID_RESOLUTIONS).toEqual(sorted);
+    });
+  });
+
+  describe('waitForScanReady', () => {
+    const originalFetch = globalThis.fetch;
+    const originalDateNow = Date.now;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+      Date.now = originalDateNow;
+    });
+
+    test('returns true when scanner transitions from Processing to Idle', async () => {
+      let callCount = 0;
+
+      globalThis.fetch = mock(() => {
+        callCount++;
+        const state = callCount <= 2 ? 'Processing' : 'Idle';
+        return Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve(`<ScannerStatus><pwg:State>${state}</pwg:State></ScannerStatus>`),
+        } as Response);
+      });
+
+      const result = await waitForScanReady(mockScannerHttp, 30000);
+
+      expect(result).toBe(true);
+    });
+
+    test('returns true after processingCount reaches 5', async () => {
+      globalThis.fetch = mock(() =>
+        Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve('<ScannerStatus><pwg:State>Processing</pwg:State></ScannerStatus>'),
+        } as Response),
+      );
+
+      const result = await waitForScanReady(mockScannerHttp, 30000);
+
+      expect(result).toBe(true);
+    });
+
+    test('returns false on timeout when scanner never becomes ready', async () => {
+      // Simulate time advancing past the timeout
+      let now = 0;
+      Date.now = mock(() => {
+        const current = now;
+        now += 20000; // Jump 20s each call so we exceed timeout quickly
+        return current;
+      });
+
+      globalThis.fetch = mock(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve('<ScannerStatus><pwg:State>Idle</pwg:State></ScannerStatus>'),
+        } as Response),
+      );
+
+      const result = await waitForScanReady(mockScannerHttp, 1000);
+
+      expect(result).toBe(false);
+    });
+
+    test('does not return true for Idle without prior Processing', async () => {
+      // First call returns Idle (no prior Processing), then time runs out
+      let callIndex = 0;
+      let now = 0;
+      Date.now = mock(() => {
+        const current = now;
+        // Advance past timeout after first poll cycle
+        if (callIndex > 0) {
+          now += 70000;
+        }
+        callIndex++;
+        return current;
+      });
+
+      globalThis.fetch = mock(() =>
+        Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve('<ScannerStatus><pwg:State>Idle</pwg:State></ScannerStatus>'),
+        } as Response),
+      );
+
+      const result = await waitForScanReady(mockScannerHttp, 60000);
+
+      expect(result).toBe(false);
+    });
+
+    test('ignores fetch errors during polling and continues', async () => {
+      let callCount = 0;
+
+      globalThis.fetch = mock(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.reject(new Error('Network error'));
+        }
+        // After the error, transition Processing → Idle to finish quickly
+        if (callCount === 2) {
+          return Promise.resolve({
+            ok: true,
+            text: () =>
+              Promise.resolve('<ScannerStatus><pwg:State>Processing</pwg:State></ScannerStatus>'),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve('<ScannerStatus><pwg:State>Idle</pwg:State></ScannerStatus>'),
+        } as Response);
+      });
+
+      const result = await waitForScanReady(mockScannerHttp, 30000);
+
+      expect(result).toBe(true);
+      expect(callCount).toBeGreaterThan(2);
+    });
+
+    test('ignores non-ok responses and continues polling', async () => {
+      let callCount = 0;
+
+      globalThis.fetch = mock(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 503,
+            text: () => Promise.resolve('Service Unavailable'),
+          } as Response);
+        }
+        // After the error, transition Processing → Idle to finish quickly
+        if (callCount === 2) {
+          return Promise.resolve({
+            ok: true,
+            text: () =>
+              Promise.resolve('<ScannerStatus><pwg:State>Processing</pwg:State></ScannerStatus>'),
+          } as Response);
+        }
+        return Promise.resolve({
+          ok: true,
+          text: () => Promise.resolve('<ScannerStatus><pwg:State>Idle</pwg:State></ScannerStatus>'),
+        } as Response);
+      });
+
+      const result = await waitForScanReady(mockScannerHttp, 30000);
+
+      expect(result).toBe(true);
+    });
+
+    test('handles unknown state in XML response', async () => {
+      let callCount = 0;
+      let now = 0;
+      Date.now = mock(() => {
+        const current = now;
+        if (callCount > 1) {
+          now += 70000;
+        }
+        return current;
+      });
+
+      globalThis.fetch = mock(() => {
+        callCount++;
+        return Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve('<ScannerStatus><pwg:State>SomethingWeird</pwg:State></ScannerStatus>'),
+        } as Response);
+      });
+
+      const result = await waitForScanReady(mockScannerHttp, 60000);
+
+      expect(result).toBe(false);
+    });
+
+    test('polls the correct scanner status URL', async () => {
+      let capturedUrl: string | undefined;
+      let callCount = 0;
+
+      globalThis.fetch = mock((url: string) => {
+        capturedUrl = url;
+        callCount++;
+        // Return Processing enough times to trigger the processingCount >= 5 exit
+        return Promise.resolve({
+          ok: true,
+          text: () =>
+            Promise.resolve('<ScannerStatus><pwg:State>Processing</pwg:State></ScannerStatus>'),
+        } as Response);
+      });
+
+      await waitForScanReady(mockScannerHttp, 30000);
+
+      expect(capturedUrl).toBe('http://192.168.1.101:80/eSCL/ScannerStatus');
+      expect(callCount).toBeGreaterThanOrEqual(5);
+    });
+  });
+
+  describe('cancelScanJob', () => {
+    const originalFetch = globalThis.fetch;
+
+    afterEach(() => {
+      globalThis.fetch = originalFetch;
+    });
+
+    test('sends DELETE request to the job URL', async () => {
+      let capturedUrl: string | undefined;
+      let capturedMethod: string | undefined;
+
+      globalThis.fetch = mock((url: string, options?: RequestInit) => {
+        capturedUrl = url;
+        capturedMethod = options?.method;
+        return Promise.resolve({ ok: true } as Response);
+      });
+
+      await cancelScanJob('http://192.168.1.100/eSCL/ScanJobs/1234');
+
+      expect(capturedUrl).toBe('http://192.168.1.100/eSCL/ScanJobs/1234');
+      expect(capturedMethod).toBe('DELETE');
+    });
+
+    test('does not throw on successful cancellation', async () => {
+      globalThis.fetch = mock(() => Promise.resolve({ ok: true } as Response));
+
+      // Should resolve without throwing
+      await expect(
+        cancelScanJob('http://192.168.1.100/eSCL/ScanJobs/1234'),
+      ).resolves.toBeUndefined();
+    });
+
+    test('suppresses fetch errors without throwing', async () => {
+      globalThis.fetch = mock(() => Promise.reject(new Error('Connection refused')));
+
+      // Should resolve without throwing despite the fetch error
+      await expect(
+        cancelScanJob('http://192.168.1.100/eSCL/ScanJobs/1234'),
+      ).resolves.toBeUndefined();
+    });
+
+    test('suppresses HTTP error responses without throwing', async () => {
+      globalThis.fetch = mock(() =>
+        Promise.resolve({
+          ok: false,
+          status: 404,
+        } as Response),
+      );
+
+      // Should resolve without throwing even on 404
+      await expect(
+        cancelScanJob('http://192.168.1.100/eSCL/ScanJobs/9999'),
+      ).resolves.toBeUndefined();
     });
   });
 

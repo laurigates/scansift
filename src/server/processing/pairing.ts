@@ -23,6 +23,7 @@
  */
 
 import type { CroppedPhoto, GridPosition, PairingResult, PhotoPair } from '../../shared/types';
+import { logger } from '../logger';
 
 /**
  * Canonical order for grid positions.
@@ -164,17 +165,18 @@ export function pairPhotos(fronts: CroppedPhoto[], backs: CroppedPhoto[]): Pairi
   const unmatched = pairs.filter((p) => p.back === undefined).length;
 
   // Log pairing statistics
-  console.log('Photo pairing statistics:');
-  console.log(`  Total pairs: ${pairs.length}`);
-  console.log(`  Matched (front + back): ${matched}`);
-  console.log(`  Unmatched (front only): ${unmatched}`);
-  console.log(`  Extra backs ignored: ${extraBackPositions.length}`);
+  logger.info(
+    {
+      totalPairs: pairs.length,
+      matched,
+      unmatched,
+      extraBacksIgnored: extraBackPositions.length,
+    },
+    'Photo pairing statistics',
+  );
 
   if (warnings.length > 0) {
-    console.log('Pairing warnings:');
-    for (const warning of warnings) {
-      console.log(`  - ${warning}`);
-    }
+    logger.warn({ warnings }, 'Pairing warnings');
   }
 
   return {

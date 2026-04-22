@@ -7,18 +7,14 @@
  * - Batch completion and reset
  */
 
+import { TIMEOUTS } from '@shared/constants';
 import type { FastifyInstance } from 'fastify';
-import sharp from 'sharp';
-import type { GridPosition, ScanOptions } from '@/shared/types';
+import type { ScanOptions } from '@/shared/types';
+import { AppError } from '../errors';
+import { generatePreviews } from '../processing/thumbnail';
 import { ScanOrchestrator } from '../services/scan-orchestrator';
 import { discoverScanners, getScannerStatus } from '../services/scanner';
-
-/**
- * Request body for scan endpoints
- */
-interface ScanRequestBody {
-  resolution?: 300 | 600;
-}
+import { positionParamSchema, scanRequestSchema } from './schemas';
 
 /**
  * Augment Fastify instance with scan orchestrator
@@ -30,13 +26,39 @@ declare module 'fastify' {
 }
 
 /**
+ * Map error types to HTTP status codes using error codes instead of string matching
+ */
+const getErrorStatusCode = (error: Error): number => {
+  if (error instanceof AppError) {
+    switch (error.code) {
+      case 'SCANNER_ERROR':
+        return 404;
+      case 'DETECTION_ERROR':
+        return 422;
+      case 'PROCESSING_ERROR':
+        return 500;
+      case 'STORAGE_ERROR':
+        return 500;
+    }
+  }
+  // State validation errors
+  if (error.message.includes('Cannot start') || error.message.includes('Must complete')) {
+    return 409;
+  }
+  if (error.message.includes('No front scan')) {
+    return 409;
+  }
+  return 500;
+};
+
+/**
  * Register scan routes
  */
 export const registerScanRoutes = async (app: FastifyInstance) => {
   // Initialize scan orchestrator singleton
   if (!app.scanOrchestrator) {
     app.scanOrchestrator = new ScanOrchestrator({
-      scanTimeout: 120000, // 2 minutes
+      scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
       outputDirectory: './scanned-photos',
     });
   }
@@ -50,7 +72,7 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
   app.get('/api/scanner/discover', async (request, reply) => {
     try {
       request.log.info('Starting scanner discovery');
-      const scanners = await discoverScanners(10000); // 10 second timeout
+      const scanners = await discoverScanners(TIMEOUTS.ROUTE_DISCOVERY_TIMEOUT_MS);
 
       if (scanners.length === 0) {
         return reply.status(404).send({
@@ -95,7 +117,7 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
       }
 
       // Try to get detailed status from first discovered scanner
-      const scanners = await discoverScanners(5000);
+      const scanners = await discoverScanners(TIMEOUTS.QUICK_DISCOVERY_TIMEOUT_MS);
       if (scanners.length === 0) {
         return {
           available: false,
@@ -137,18 +159,17 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
    * POST /api/scan/front
    * Start a front scan operation
    */
-  app.post<{ Body: ScanRequestBody }>('/api/scan/front', async (request, reply) => {
+  app.post('/api/scan/front', async (request, reply) => {
     try {
-      const { resolution } = request.body;
-
-      // Validate resolution if provided
-      if (resolution && resolution !== 300 && resolution !== 600) {
+      const parsed = scanRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
         return reply.status(400).send({
-          error: 'Invalid resolution',
-          message: 'Resolution must be 300 or 600 DPI',
+          error: 'Invalid request',
+          details: parsed.error.flatten(),
         });
       }
 
+      const { resolution } = parsed.data;
       const options: ScanOptions | undefined = resolution
         ? { resolution, colorMode: 'RGB24', format: 'image/jpeg' }
         : undefined;
@@ -165,18 +186,7 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
       };
     } catch (error) {
       request.log.error(error, 'Front scan failed');
-
-      // Determine appropriate status code based on error
-      let statusCode = 500;
-      if (error instanceof Error) {
-        if (error.message.includes('Cannot start') || error.message.includes('state')) {
-          statusCode = 409; // Conflict - wrong state
-        } else if (error.message.includes('No scanner') || error.message.includes('not found')) {
-          statusCode = 404; // Scanner not found
-        } else if (error.message.includes('No photos detected')) {
-          statusCode = 422; // Unprocessable - scan succeeded but no photos found
-        }
-      }
+      const statusCode = getErrorStatusCode(error as Error);
 
       return reply.status(statusCode).send({
         error: 'Front scan failed',
@@ -189,18 +199,17 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
    * POST /api/scan/back
    * Start a back scan operation (must be called after front scan)
    */
-  app.post<{ Body: ScanRequestBody }>('/api/scan/back', async (request, reply) => {
+  app.post('/api/scan/back', async (request, reply) => {
     try {
-      const { resolution } = request.body;
-
-      // Validate resolution if provided
-      if (resolution && resolution !== 300 && resolution !== 600) {
+      const parsed = scanRequestSchema.safeParse(request.body);
+      if (!parsed.success) {
         return reply.status(400).send({
-          error: 'Invalid resolution',
-          message: 'Resolution must be 300 or 600 DPI',
+          error: 'Invalid request',
+          details: parsed.error.flatten(),
         });
       }
 
+      const { resolution } = parsed.data;
       const options: ScanOptions | undefined = resolution
         ? { resolution, colorMode: 'RGB24', format: 'image/jpeg' }
         : undefined;
@@ -217,21 +226,7 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
       };
     } catch (error) {
       request.log.error(error, 'Back scan failed');
-
-      // Determine appropriate status code
-      let statusCode = 500;
-      if (error instanceof Error) {
-        if (
-          error.message.includes('Cannot start') ||
-          error.message.includes('Must complete front scan')
-        ) {
-          statusCode = 409; // Conflict - must do front scan first
-        } else if (error.message.includes('No scanner') || error.message.includes('not found')) {
-          statusCode = 404;
-        } else if (error.message.includes('No photos detected')) {
-          statusCode = 422;
-        }
-      }
+      const statusCode = getErrorStatusCode(error as Error);
 
       return reply.status(statusCode).send({
         error: 'Back scan failed',
@@ -259,13 +254,7 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
       };
     } catch (error) {
       request.log.error(error, 'Batch completion failed');
-
-      let statusCode = 500;
-      if (error instanceof Error) {
-        if (error.message.includes('No front scan')) {
-          statusCode = 409; // Conflict - no scan to complete
-        }
-      }
+      const statusCode = getErrorStatusCode(error as Error);
 
       return reply.status(statusCode).send({
         error: 'Batch completion failed',
@@ -322,34 +311,14 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
    */
   app.get('/api/scan/previews', async (request, reply) => {
     try {
-      const frontScanResult = orchestrator.frontScanResult;
+      const frontScanResult = orchestrator.getFrontScanResult();
 
       // Return empty array if no scan has been done yet
       if (!frontScanResult || !frontScanResult.detectedPhotos) {
         return { previews: [] };
       }
 
-      // Generate thumbnails for all detected photos
-      const previews = await Promise.all(
-        frontScanResult.detectedPhotos.map(async (photo) => {
-          // Resize to max 400px maintaining aspect ratio
-          const thumbnail = await sharp(photo.image)
-            .resize(400, 400, {
-              fit: 'inside',
-              withoutEnlargement: true,
-            })
-            .jpeg({ quality: 85 })
-            .toBuffer();
-
-          return {
-            position: photo.position,
-            thumbnail: thumbnail.toString('base64'),
-            bounds: photo.bounds,
-            confidence: photo.confidence,
-          };
-        }),
-      );
-
+      const previews = await generatePreviews(frontScanResult.detectedPhotos);
       return { previews };
     } catch (error) {
       request.log.error(error, 'Failed to get previews');
@@ -368,23 +337,16 @@ export const registerScanRoutes = async (app: FastifyInstance) => {
     '/api/scan/preview/:position',
     async (request, reply) => {
       try {
-        const { position } = request.params;
-
-        // Validate position parameter
-        const validPositions: GridPosition[] = [
-          'top-left',
-          'top-right',
-          'bottom-left',
-          'bottom-right',
-        ];
-        if (!validPositions.includes(position as GridPosition)) {
+        const parsed = positionParamSchema.safeParse(request.params);
+        if (!parsed.success) {
           return reply.status(400).send({
             error: 'Invalid position',
-            message: `Position must be one of: ${validPositions.join(', ')}`,
+            details: parsed.error.flatten(),
           });
         }
 
-        const frontScanResult = orchestrator.frontScanResult;
+        const { position } = parsed.data;
+        const frontScanResult = orchestrator.getFrontScanResult();
 
         // Check if scan has been done
         if (!frontScanResult || !frontScanResult.detectedPhotos) {

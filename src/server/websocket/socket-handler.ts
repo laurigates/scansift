@@ -7,9 +7,10 @@
  * - Client events: scan:start, scan:cancel
  */
 
-import sharp from 'sharp';
 import type { Socket, Server as SocketIOServer } from 'socket.io';
 import type { ScanState, ServerEvent } from '@/shared/types';
+import { logger } from '../logger';
+import { generatePreviews, type PhotoPreview } from '../processing/thumbnail';
 import type { ScanOrchestrator } from '../services/scan-orchestrator';
 
 /**
@@ -18,21 +19,6 @@ import type { ScanOrchestrator } from '../services/scan-orchestrator';
 interface ClientToServerEvents {
   'scan:start': (data: { scanType: 'front' | 'back' }) => void;
   'scan:cancel': (data: { scanId: string }) => void;
-}
-
-/**
- * Interface for photo preview data
- */
-interface PhotoPreview {
-  position: string;
-  thumbnail: string;
-  bounds: {
-    x: number;
-    y: number;
-    width: number;
-    height: number;
-  };
-  confidence: number;
 }
 
 /**
@@ -72,7 +58,7 @@ export const initializeSocketHandler = (
 
   // Handle client connections
   io.on('connection', (socket: TypedSocket) => {
-    console.log(`Client connected: ${socket.id}`);
+    logger.info({ socketId: socket.id }, 'Client connected');
 
     // Send initial scanner status
     void checkAndEmitScannerStatus(socket, orchestrator);
@@ -83,7 +69,7 @@ export const initializeSocketHandler = (
 
     // Handle scan:start event
     socket.on('scan:start', async ({ scanType }) => {
-      console.log(`[${socket.id}] Received scan:start request: ${scanType}`);
+      logger.info({ socketId: socket.id, scanType }, 'Received scan:start request');
 
       try {
         if (scanType === 'front') {
@@ -94,25 +80,23 @@ export const initializeSocketHandler = (
           throw new Error(`Invalid scan type: ${scanType}`);
         }
       } catch (error) {
-        console.error(`[${socket.id}] Scan failed:`, error);
+        logger.error({ socketId: socket.id, err: error }, 'Scan failed');
         // Error will be emitted via orchestrator's error event
       }
     });
 
     // Handle scan:cancel event
     socket.on('scan:cancel', ({ scanId }) => {
-      console.log(`[${socket.id}] Received scan:cancel request: ${scanId}`);
-      // TODO: Implement scan cancellation in orchestrator
-      console.warn('Scan cancellation not yet implemented');
+      logger.warn({ socketId: socket.id, scanId }, 'Scan cancellation not yet implemented');
     });
 
     // Handle disconnection
     socket.on('disconnect', (reason) => {
-      console.log(`Client disconnected: ${socket.id} (${reason})`);
+      logger.info({ socketId: socket.id, reason }, 'Client disconnected');
     });
   });
 
-  console.log('Socket.IO handler initialized');
+  logger.info('Socket.IO handler initialized');
 };
 
 /**
@@ -127,13 +111,13 @@ const setupOrchestratorListeners = (
 ): void => {
   // Broadcast state changes
   orchestrator.on('state:changed', (state: ScanState) => {
-    console.log(`State changed: ${state.status}`);
+    logger.debug({ status: state.status }, 'State changed');
     io.emit('state:changed', state);
   });
 
   // Broadcast scan progress
   orchestrator.on('scan:progress', (scanId: string, progress: number) => {
-    console.log(`[${scanId}] Progress: ${progress}%`);
+    logger.debug({ scanId, progress }, 'Scan progress');
     io.emit('scan:progress', {
       type: 'scan:progress',
       scanId,
@@ -143,7 +127,7 @@ const setupOrchestratorListeners = (
 
   // Broadcast scan completion
   orchestrator.on('scan:complete', async (scanId: string, photosDetected: number) => {
-    console.log(`[${scanId}] Complete: ${photosDetected} photos detected`);
+    logger.info({ scanId, photosDetected }, 'Scan complete');
     io.emit('scan:complete', {
       type: 'scan:complete',
       scanId,
@@ -151,42 +135,20 @@ const setupOrchestratorListeners = (
     });
 
     // Generate and emit photo previews
-    const frontScanResult = orchestrator.frontScanResult;
+    const frontScanResult = orchestrator.getFrontScanResult();
     if (frontScanResult?.detectedPhotos) {
       try {
-        const previews = await Promise.all(
-          frontScanResult.detectedPhotos.map(async (photo) => {
-            // Resize to max 400px maintaining aspect ratio
-            const thumbnail = await sharp(photo.image)
-              .resize(400, 400, {
-                fit: 'inside',
-                withoutEnlargement: true,
-              })
-              .jpeg({ quality: 85 })
-              .toBuffer();
-
-            return {
-              position: photo.position,
-              thumbnail: thumbnail.toString('base64'),
-              bounds: photo.bounds,
-              confidence: photo.confidence,
-            };
-          }),
-        );
-
-        io.emit('photos:detected', {
-          scanId,
-          previews,
-        });
+        const previews = await generatePreviews(frontScanResult.detectedPhotos);
+        io.emit('photos:detected', { scanId, previews });
       } catch (error) {
-        console.error('Failed to generate photo previews:', error);
+        logger.error({ err: error }, 'Failed to generate photo previews');
       }
     }
   });
 
   // Broadcast scan errors
   orchestrator.on('scan:error', (scanId: string, error: Error) => {
-    console.error(`[${scanId}] Error:`, error);
+    logger.error({ scanId, err: error }, 'Scan error');
     io.emit('scan:error', {
       type: 'scan:error',
       scanId,
@@ -196,8 +158,7 @@ const setupOrchestratorListeners = (
 
   // Broadcast batch completion
   orchestrator.on('batch:complete', (result) => {
-    console.log(`Batch complete: ${result.batchId} (${result.pairsSaved} pairs saved)`);
-    // This maps to scan:complete with the final count
+    logger.info({ batchId: result.batchId, pairsSaved: result.pairsSaved }, 'Batch complete');
     io.emit('scan:complete', {
       type: 'scan:complete',
       scanId: result.batchId,
@@ -223,7 +184,7 @@ const checkAndEmitScannerStatus = async (
       available,
     });
   } catch (error) {
-    console.error('Failed to check scanner status:', error);
+    logger.error({ err: error }, 'Failed to check scanner status');
     socket.emit('scanner:status', {
       type: 'scanner:status',
       available: false,
