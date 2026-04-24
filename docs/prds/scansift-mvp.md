@@ -1,9 +1,9 @@
 ---
 id: PRD-001
 title: ScanSift Product Requirements
-status: accepted
-created: 2026-03-05
-source: .claude/blueprints/prds/photoscan-mvp.md
+status: Accepted
+date: 2026-03-05
+source: docs/prds/photoscan-mvp-longform.md
 ---
 
 # PRD-001: ScanSift

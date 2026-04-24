@@ -10,9 +10,9 @@ Continue project development:
    - Run `git log -5 --oneline` (recent commits)
 
 2. **Read context**:
-   - All PRDs in `.claude/blueprints/prds/`
-   - `work-overview.md` (current phase and progress) if it exists
-   - Recent work-orders (completed and pending) if they exist
+   - All PRDs in `docs/prds/`
+   - `docs/blueprint/work-overview.md` (current phase and progress) if it exists
+   - Recent work-orders under `docs/blueprint/work-orders/` (completed and pending) if they exist
 
 3. **Identify next task**:
    - Based on PRD requirements

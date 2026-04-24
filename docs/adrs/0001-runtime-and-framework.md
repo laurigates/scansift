@@ -1,8 +1,9 @@
 ---
 id: ADR-001
 title: Runtime and Framework Selection (Bun + Fastify + React)
-status: accepted
-created: 2026-03-05
+status: Accepted
+date: 2026-03-05
+domain: runtime-and-framework
 ---
 
 # ADR-001: Runtime and Framework Selection

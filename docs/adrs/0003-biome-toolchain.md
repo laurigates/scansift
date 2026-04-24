@@ -1,8 +1,9 @@
 ---
 id: ADR-003
 title: Biome Toolchain (replacing ESLint + Prettier)
-status: accepted
-created: 2026-03-05
+status: Accepted
+date: 2026-03-05
+domain: build-tooling
 ---
 
 # ADR-003: Biome Toolchain
