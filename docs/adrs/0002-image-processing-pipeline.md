@@ -1,8 +1,9 @@
 ---
 id: ADR-002
 title: Image Processing Pipeline (Sharp + OpenCV.js + Tesseract.js)
-status: accepted
-created: 2026-03-05
+status: Accepted
+date: 2026-03-05
+domain: image-processing
 ---
 
 # ADR-002: Image Processing Pipeline

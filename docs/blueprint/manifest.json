@@ -1,0 +1,198 @@
+{
+  "$schema": "https://raw.githubusercontent.com/laurigates/claude-plugins/main/blueprint-plugin/schemas/manifest.schema.json",
+  "format_version": "3.3.0",
+  "created_at": "2026-03-05T00:00:00Z",
+  "updated_at": "2026-04-24T00:00:00Z",
+  "created_by": {
+    "blueprint_plugin": "3.29.0"
+  },
+  "project": {
+    "name": "ScanSift",
+    "description": "Network-enabled batch photo scanning application for digitizing physical photo collections. Scans up to 4 photos at once from a flatbed scanner, auto-detects and crops individual photos, pairs fronts with backs, and extracts OCR metadata from photo backs.",
+    "repository": "https://github.com/laurigates/scansift",
+    "license": "MIT",
+    "detected_stack": [
+      "bun",
+      "typescript",
+      "fastify",
+      "react",
+      "vite",
+      "socket.io",
+      "sqlite",
+      "drizzle",
+      "zustand",
+      "tailwind",
+      "sharp",
+      "opencv.js",
+      "tesseract.js",
+      "biome",
+      "playwright"
+    ]
+  },
+  "structure": {
+    "has_prds": true,
+    "has_adrs": true,
+    "has_prps": true,
+    "has_work_orders": true,
+    "has_ai_docs": true,
+    "has_modular_rules": true,
+    "has_feature_tracker": false,
+    "has_document_detection": false,
+    "claude_md_mode": "both",
+    "generated_rules_path": ".claude/rules/"
+  },
+  "documents": [
+    {
+      "id": "PRD-001",
+      "type": "prd",
+      "title": "ScanSift Product Requirements",
+      "file": "docs/prds/scansift-mvp.md",
+      "status": "Accepted",
+      "date": "2026-03-05"
+    },
+    {
+      "id": "PRD-001-longform",
+      "type": "prd",
+      "title": "PhotoScan MVP (original long-form PRD, source for PRD-001)",
+      "file": "docs/prds/photoscan-mvp-longform.md",
+      "status": "Accepted",
+      "date": "2026-03-05"
+    },
+    {
+      "id": "ADR-001",
+      "type": "adr",
+      "title": "Runtime and Framework Selection (Bun + Fastify + React)",
+      "file": "docs/adrs/0001-runtime-and-framework.md",
+      "status": "Accepted",
+      "date": "2026-03-05",
+      "domain": "runtime-and-framework"
+    },
+    {
+      "id": "ADR-002",
+      "type": "adr",
+      "title": "Image Processing Pipeline (Sharp + OpenCV.js + Tesseract.js)",
+      "file": "docs/adrs/0002-image-processing-pipeline.md",
+      "status": "Accepted",
+      "date": "2026-03-05",
+      "domain": "image-processing"
+    },
+    {
+      "id": "ADR-003",
+      "type": "adr",
+      "title": "Biome Toolchain (replacing ESLint + Prettier)",
+      "file": "docs/adrs/0003-biome-toolchain.md",
+      "status": "Accepted",
+      "date": "2026-03-05",
+      "domain": "build-tooling"
+    }
+  ],
+  "generated": {
+    "rules": {},
+    "commands": {}
+  },
+  "custom_overrides": {
+    "skills": [],
+    "commands": []
+  },
+  "task_registry": {
+    "derive-prd": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "on-demand",
+      "stats": {},
+      "context": {}
+    },
+    "derive-plans": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "weekly",
+      "stats": {},
+      "context": {}
+    },
+    "derive-rules": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "weekly",
+      "stats": {},
+      "context": {}
+    },
+    "generate-rules": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "on-change",
+      "stats": {},
+      "context": {}
+    },
+    "adr-validate": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "weekly",
+      "stats": {},
+      "context": {}
+    },
+    "feature-tracker-sync": {
+      "enabled": false,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "daily",
+      "stats": {},
+      "context": {}
+    },
+    "sync-ids": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "on-change",
+      "stats": {},
+      "context": {}
+    },
+    "claude-md": {
+      "enabled": true,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "on-change",
+      "stats": {},
+      "context": {}
+    },
+    "curate-docs": {
+      "enabled": false,
+      "auto_run": false,
+      "last_completed_at": null,
+      "last_result": null,
+      "schedule": "on-demand",
+      "stats": {},
+      "context": {}
+    }
+  },
+  "upgrade_history": [
+    {
+      "from_version": "1.0.0",
+      "to_version": "3.3.0",
+      "upgraded_at": "2026-04-24T00:00:00Z",
+      "changes": [
+        "Converted manifest.yaml (custom schema, no format_version) to manifest.json v3.3.0",
+        "Moved PRD.md -> docs/prds/scansift-mvp.md",
+        "Moved .claude/blueprints/prds/photoscan-mvp.md -> docs/prds/photoscan-mvp-longform.md",
+        "Renamed ADR-00N-*.md -> docs/adrs/000N-*.md (4-digit canonical prefix)",
+        "Normalized ADR frontmatter: status capitalized (enum), created -> date, added domain tags",
+        "Created docs/blueprint/{work-orders,ai_docs}/ subdirectories and README.md",
+        "Relocated .claude/blueprints/work-overview.md -> docs/blueprint/work-overview.md",
+        "Removed empty .claude/blueprints/ directory",
+        "Classified as standalone blueprint (no monorepo workspaces)"
+      ]
+    }
+  ]
+}

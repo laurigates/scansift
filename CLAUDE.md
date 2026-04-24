@@ -109,3 +109,17 @@ Install hooks: `pre-commit install` (runs automatically via `bun install` prepar
 ## Docker
 
 Multi-stage build using `oven/bun:1-alpine`. Exposes port 3000 with a `/api/health` endpoint for health checks. Published to GHCR via CI.
+
+## Blueprint
+
+Blueprint Development state (format version **3.3.0**, standalone) lives under `docs/`:
+
+- `docs/blueprint/manifest.json` — blueprint config, document index, task registry
+- `docs/blueprint/README.md` — blueprint overview and command reference
+- `docs/blueprint/work-orders/` — task packages for subagent execution (git-ignored)
+- `docs/blueprint/ai_docs/` — curated AI-context documentation
+- `docs/prds/` — Product Requirements Documents (PRD-001 = `scansift-mvp.md`)
+- `docs/adrs/` — Architecture Decision Records (0001-runtime, 0002-image-pipeline, 0003-biome)
+- `docs/prps/` — Product Requirement Prompts (empty; add with `/blueprint:prp-create`)
+
+Use `/blueprint:status` to inspect and `/blueprint:upgrade` to bump the format.
