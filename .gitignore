@@ -48,3 +48,9 @@ tmp/
 # Blueprint work orders (task-specific, may contain sensitive context)
 docs/blueprint/work-orders/
 
+# Claude Code agent worktrees (transient, per-session)
+.claude/worktrees/
+
+# Ad-hoc agent probe scripts
+tmp_probe*.ts
+
