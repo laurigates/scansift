@@ -20,7 +20,7 @@ import { initializeSocketHandler } from './websocket/socket-handler';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const createApp = async () => {
+export const createApp = async () => {
   const app = Fastify({
     logger: true,
   });
@@ -86,4 +86,7 @@ const start = async () => {
   }
 };
 
-start();
+// Only auto-start when this file is executed directly (not imported by tests)
+if (import.meta.main) {
+  start();
+}
