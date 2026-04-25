@@ -1,5 +1,10 @@
 # PhotoScan MVP - Product Requirements Document
 
+> **Note:** This longform document captures the original product intent. For the
+> current implementation status (what is built vs. roadmap), see the short PRD
+> at [`scansift-mvp.md`](./scansift-mvp.md), which includes a per-requirement
+> Status column and a "Known Drift / Implementation Notes" section.
+
 ## Executive Summary
 
 ### Problem Statement

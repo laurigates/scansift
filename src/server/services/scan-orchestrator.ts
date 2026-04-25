@@ -28,17 +28,28 @@ import type {
   ScanResult,
   ScanState,
 } from '@/shared/types';
-import { detectPhotos } from '../detection/photo-detector';
+import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector';
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
-import { enhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
+import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 // Import existing modules
 import {
   type DiscoveredScanner,
-  discoverScanners,
-  performScan as esclPerformScan,
+  discoverScanners as defaultDiscoverScanners,
+  performScan as defaultEsclPerformScan,
   type ScanProgressCallback,
 } from './scanner';
+
+/**
+ * Injectable dependencies for ScanOrchestrator. Used for testing.
+ * In production code, leave undefined to use the real implementations.
+ */
+export interface OrchestratorDependencies {
+  discoverScanners?: typeof defaultDiscoverScanners;
+  performScan?: typeof defaultEsclPerformScan;
+  detectPhotos?: typeof defaultDetectPhotos;
+  enhancePhoto?: typeof defaultEnhancePhoto;
+}
 
 /**
  * Events emitted by the orchestrator for UI updates
@@ -78,11 +89,23 @@ export class ScanOrchestrator extends EventEmitter {
   private backScanResult: ScanResult | null = null;
   private scanTimeout: number;
   private outputDirectory: string;
+  private discoverScanners: typeof defaultDiscoverScanners;
+  private esclPerformScan: typeof defaultEsclPerformScan;
+  private detectPhotos: typeof defaultDetectPhotos;
+  private enhancePhoto: typeof defaultEnhancePhoto;
 
-  constructor(options?: { scanTimeout?: number; outputDirectory?: string }) {
+  constructor(options?: {
+    scanTimeout?: number;
+    outputDirectory?: string;
+    deps?: OrchestratorDependencies;
+  }) {
     super();
     this.scanTimeout = options?.scanTimeout ?? TIMEOUTS.SCAN_TIMEOUT_MS;
     this.outputDirectory = options?.outputDirectory ?? DEFAULT_OUTPUT_DIR;
+    this.discoverScanners = options?.deps?.discoverScanners ?? defaultDiscoverScanners;
+    this.esclPerformScan = options?.deps?.performScan ?? defaultEsclPerformScan;
+    this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
+    this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
   }
 
   /**
@@ -104,7 +127,7 @@ export class ScanOrchestrator extends EventEmitter {
    */
   async isScannerReady(): Promise<boolean> {
     try {
-      const scanners = await discoverScanners(TIMEOUTS.QUICK_DISCOVERY_TIMEOUT_MS);
+      const scanners = await this.discoverScanners(TIMEOUTS.QUICK_DISCOVERY_TIMEOUT_MS);
       this.currentScanner = scanners[0] ?? null;
       return this.currentScanner !== null;
     } catch {
@@ -152,7 +175,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Detect photos
       this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.DETECTION_COMPLETE);
-      const detectionResult = await detectPhotos(rawImage, mergedOptions.resolution);
+      const detectionResult = await this.detectPhotos(rawImage, mergedOptions.resolution);
 
       if (detectionResult.photos.length === 0) {
         throw new DetectionError('No photos detected in scan', 0);
@@ -250,7 +273,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Detect photos
       this.emit('scan:progress', scanId, PROGRESS_WEIGHTS.DETECTION_COMPLETE);
-      const detectionResult = await detectPhotos(rawImage, mergedOptions.resolution);
+      const detectionResult = await this.detectPhotos(rawImage, mergedOptions.resolution);
 
       if (detectionResult.photos.length === 0) {
         throw new DetectionError('No photos detected in back scan', 0);
@@ -402,7 +425,7 @@ export class ScanOrchestrator extends EventEmitter {
    */
   private async ensureScanner(): Promise<DiscoveredScanner> {
     if (!this.currentScanner) {
-      const scanners = await discoverScanners(this.scanTimeout);
+      const scanners = await this.discoverScanners(this.scanTimeout);
       if (scanners.length === 0) {
         throw new ScannerError('No scanner found on network');
       }
@@ -455,7 +478,12 @@ export class ScanOrchestrator extends EventEmitter {
     };
 
     // Perform the actual scan using eSCL protocol
-    const imageBuffer = await esclPerformScan(scanner, options, this.scanTimeout, progressCallback);
+    const imageBuffer = await this.esclPerformScan(
+      scanner,
+      options,
+      this.scanTimeout,
+      progressCallback,
+    );
 
     logger.info({ scanId, sizeMB: (imageBuffer.length / 1024 / 1024).toFixed(2) }, 'Scan complete');
 
@@ -503,7 +531,7 @@ export class ScanOrchestrator extends EventEmitter {
           .toBuffer();
 
         // Enhance cropped photo
-        const enhanced = await enhancePhoto(cropped, PRESET_STANDARD);
+        const enhanced = await this.enhancePhoto(cropped, PRESET_STANDARD);
 
         // Update photo with processed image
         processed.push({
@@ -593,6 +621,7 @@ export class ScanOrchestrator extends EventEmitter {
 export const createScanOrchestrator = (options?: {
   scanTimeout?: number;
   outputDirectory?: string;
+  deps?: OrchestratorDependencies;
 }): ScanOrchestrator => {
   return new ScanOrchestrator(options);
 };

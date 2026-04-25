@@ -8,7 +8,7 @@ export default defineConfig({
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
   use: {
-    baseURL: 'http://localhost:5173',
+    baseURL: 'http://localhost:3000',
     trace: 'on-first-retry',
   },
   projects: [
@@ -26,8 +26,13 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: 'bun run dev',
-    url: 'http://localhost:5173',
+    // Build the client + run the production server. The `bun run dev` script
+    // uses --filter for a workspaces setup that isn't configured here, so we
+    // boot the built static + Fastify server directly which serves the same
+    // UI on port 3000.
+    command: 'bun run build && bun run start',
+    url: 'http://localhost:3000/api/health',
     reuseExistingServer: !process.env.CI,
+    timeout: 120_000,
   },
 });
