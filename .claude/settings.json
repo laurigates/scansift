@@ -2,22 +2,16 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "permissions": {
     "allow": [
-      "mcp__*",
+      "mcp__context7",
+      "mcp__sequential-thinking",
+      "WebSearch",
       "Bash(bun *)",
       "Bash(npm run *)",
       "Bash(npx *)",
       "Bash(git *)",
       "Bash(gh *)",
       "Bash(docker *)",
-      "Bash(docker-compose *)",
-      "Read",
-      "Edit",
-      "Write",
-      "Glob",
-      "Grep",
-      "Task(*)",
-      "WebFetch(*)",
-      "WebSearch(*)"
+      "Bash(docker-compose *)"
     ],
     "deny": [
       "Bash(rm -rf /)",
