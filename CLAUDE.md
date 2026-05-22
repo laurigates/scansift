@@ -11,8 +11,8 @@ ScanSift is a network-enabled batch photo scanning application for digitizing ph
 - **Server**: Fastify with Socket.IO for real-time updates
 - **Client**: React 18 with Vite, Tailwind CSS, Radix UI
 - **State Management**: Zustand
-- **Image Processing**: Sharp, OpenCV.js (WASM)
-- **OCR**: Tesseract.js
+- **Image Processing**: Sharp
+- **OCR**: Not yet implemented (see PRD-001 known drift)
 - **Database**: SQLite with Drizzle ORM
 - **Testing**: Bun test (unit/integration), Playwright (E2E)
 - **Linting/Formatting**: Biome 2.3.8
@@ -59,7 +59,7 @@ src/
 │   ├── stores/          # Zustand state stores
 │   └── styles/          # Tailwind CSS
 ├── server/              # Fastify backend
-│   ├── detection/       # Photo detection via OpenCV.js WASM
+│   ├── detection/       # Photo detection via Sharp-based Sobel edge detection
 │   ├── processing/      # Image cropping, enhancement, front/back pairing
 │   ├── routes/          # REST API endpoints (/api/...)
 │   ├── services/        # Scanner discovery (mDNS), eSCL client, scan orchestrator
@@ -78,7 +78,7 @@ scripts/                 # Developer utility scripts
 - **Client ↔ Server**: REST for commands, Socket.IO for real-time scan progress
 - **Scanner Communication**: eSCL protocol over HTTP (industry standard for network scanners)
 - **Scanner Discovery**: Bonjour/mDNS via `bonjour-service`
-- **Image Pipeline**: Scan → Detect photos (OpenCV) → Crop (Sharp) → Enhance → OCR dates → Store
+- **Image Pipeline**: Scan → Detect photos (Sharp) → Crop (Sharp) → Enhance → Store
 
 ## Code Conventions
 
@@ -102,8 +102,7 @@ Install hooks: `pre-commit install` (runs automatically via `bun install` prepar
 
 ## Known Limitations
 
-- OpenCV.js WASM tests are skipped (`describe.skip`) — WASM Promise resolution doesn't work in Bun's test runner
-- E2E test directory has placeholder `.gitkeep` only — no E2E tests written yet
+- Integration test suite for full scan flow landed in PR #20; E2E tests (tests/e2e/happy-path.spec.ts) exist but main test is currently `.skip` pending real scanner/browser harness
 - Coverage thresholds set at 80% for lines, functions, and statements
 
 ## Docker

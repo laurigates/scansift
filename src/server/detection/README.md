@@ -1,26 +1,23 @@
 # Photo Detection Module
 
-This module implements photo detection using OpenCV.js for identifying 1-4 photos placed on a flatbed scanner.
+This module implements photo detection using Sharp-based Sobel edge detection for identifying 1-4 photos placed on a flatbed scanner.
 
 ## Algorithm Overview
 
-The detection algorithm uses computer vision techniques to identify rectangular photo regions:
+The detection algorithm uses Sharp's image-processing primitives to identify rectangular photo regions:
 
 1. **Grayscale Conversion**: Convert the scanned image to grayscale for simpler processing
-2. **Gaussian Blur**: Apply blur to reduce noise and improve edge detection
-3. **Canny Edge Detection**: Detect edges in the image using the Canny algorithm
-4. **Contour Detection**: Find all contours from the edge map
-5. **Filtering**: Filter contours by:
-   - Minimum area (2" × 2" at the scan DPI)
-   - Shape approximation to quadrilaterals (4-8 vertices)
-   - Reasonable aspect ratio (0.5 to 2.0)
-6. **Position Assignment**: Assign grid positions based on spatial location (top-left, top-right, bottom-left, bottom-right)
-7. **Sorting**: Sort detected photos by position for consistent ordering
+2. **Sobel X Convolution**: Apply a 3×3 horizontal Sobel kernel via `sharp.convolve()` to surface vertical edges
+3. **Sobel Y Convolution**: Apply a 3×3 vertical Sobel kernel via `sharp.convolve()` to surface horizontal edges
+4. **Magnitude Combination**: Combine the two edge maps into a single magnitude image (sqrt of squared components, centered around 128)
+5. **Projection Profile Analysis**: Sum edge intensities along rows and columns to find horizontal and vertical edge lines bounding each photo
+6. **Region Construction**: Build candidate photo regions from intersecting edge lines, filtered by minimum area (2" × 2" at the scan DPI)
+7. **Position Assignment**: Assign grid positions based on spatial location (top-left, top-right, bottom-left, bottom-right)
+8. **Sorting**: Sort detected photos by position for consistent ordering
 
 ## Files
 
 - **`photo-detector.ts`**: Main detection algorithm implementation
-- **`opencv-loader.ts`**: OpenCV.js WASM module initialization helper
 - **`README.md`**: This file
 
 ## Usage
@@ -67,27 +64,9 @@ try {
 
 ### Detection Parameters
 
-- **Gaussian Blur**: 5×5 kernel
-- **Canny Edge Detection**: Low threshold 50, high threshold 150
-- **Contour Approximation**: 2% of arc length (Douglas-Peucker algorithm)
-- **Acceptable Vertices**: 4-8 vertices (allows for imperfect scans)
-- **Aspect Ratio Range**: 0.5 to 2.0 (width/height)
-
-## Known Issues
-
-### OpenCV.js Initialization in Bun Test Environment
-
-There is a known compatibility issue between OpenCV.js WASM initialization and Bun's test runner. The WASM module initializes correctly, but Promise resolution from the `onRuntimeInitialized` callback doesn't properly trigger `.then()` handlers in the test context.
-
-**Status**: The code works correctly in production/server context but unit tests may timeout.
-
-**Workaround Options**:
-1. Skip OpenCV-dependent tests in CI (mark as `.skip` or use test filters)
-2. Test with Node.js instead of Bun for OpenCV-related tests
-3. Create integration tests that run in a real server context
-4. Mock the OpenCV functionality for unit tests
-
-**Tracking**: See Bun issues related to WASM Promise resolution
+- **Sobel Kernels**: 3×3 X kernel `[-1,0,1,-2,0,2,-1,0,1]`, 3×3 Y kernel `[-1,-2,-1,0,0,0,1,2,1]`
+- **Edge Magnitude**: `sqrt(gx² + gy²)` clamped to 0-255, with the convolution output centered around 128
+- **Minimum Photo Area**: 2" × 2" at the scan DPI (e.g. 600×600 px at 300 DPI)
 
 ## Testing
 
@@ -110,8 +89,6 @@ bun test tests/detection/
 # Run with coverage
 bun test --coverage tests/detection/
 
-# Skip OpenCV tests (if experiencing initialization issues)
-bun test tests/detection/ --exclude "*opencv*"
 ```
 
 ## Performance
