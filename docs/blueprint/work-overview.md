@@ -47,7 +47,10 @@
 
 ### In Progress
 - ⏳ Phase 4: End-to-end testing
-  - ⏹️ Full scan workflow test with scanner
+  - ✅ Integration test suite (PR #20 / commit 1c49afe)
+    - Full-scan-flow integration tests: `tests/integration/full-scan-flow.test.ts` (288 LoC)
+    - Fake eSCL server fixture: `tests/integration/fake-escl-server.ts` (293 LoC)
+  - ⏹️ E2E with scanner (scaffolded in `tests/e2e/happy-path.spec.ts`, main test at line 42 is `.skip()` — requires discoverable scanner or stub)
   - ⏹️ Final polish
 
 ### Pending
@@ -94,9 +97,11 @@ photoscan/
    - ~~Fastify API routes for scan operations~~
    - ~~Socket.IO for real-time scan progress~~
    - ~~Enhanced React scan UI~~
-6. Phase 3: Integration testing
-   - End-to-end scan workflow test
-   - Photo preview component
+6. ✅ Phase 3: Photo preview & integration testing
+   - ✅ Full-scan-flow integration test suite (PR #20)
+7. Phase 4: E2E testing with scanner & final polish
+   - Unlock `tests/e2e/happy-path.spec.ts` main test (requires scanner stub)
+   - Final quality pass
 
 ## Scanner Commands
 ```bash
