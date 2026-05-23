@@ -28,7 +28,9 @@
     "format": "biome format --write .",
     "format:check": "biome format .",
     "check": "biome check --write .",
-    "prepare": "pre-commit install || true"
+    "prepare": "pre-commit install || true",
+    "db:generate": "drizzle-kit generate",
+    "db:migrate": "drizzle-kit migrate"
   },
   "dependencies": {
     "@fastify/static": "^7.0.0",

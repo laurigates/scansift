@@ -2,14 +2,14 @@
  * Global test setup for Bun test runner.
  */
 
-import { afterAll, beforeAll, mock } from 'bun:test';
+import { afterAll, beforeAll } from 'bun:test';
+import { createDb } from '../src/server/db';
 
-// Mock external dependencies that require native modules
-// Note: sharp is NOT mocked because we need it for image processing tests
-mock.module('better-sqlite3', () => ({}));
+// In-memory database for tests — migrations run automatically inside createDb
+export let testDb: ReturnType<typeof createDb>;
 
 beforeAll(async () => {
-  // Global test setup
+  testDb = createDb(':memory:');
 });
 
 afterAll(async () => {
