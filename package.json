@@ -57,7 +57,7 @@
   },
   "devDependencies": {
     "@biomejs/biome": "2.4.15",
-    "@happy-dom/global-registrator": "^13.3.8",
+    "@happy-dom/global-registrator": "^20.9.0",
     "@playwright/test": "^1.41.0",
     "@testing-library/react": "^14.1.2",
     "@types/bun": "latest",
