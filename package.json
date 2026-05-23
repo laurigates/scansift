@@ -38,7 +38,7 @@
     "@radix-ui/react-slot": "^1.1.0",
     "bonjour-service": "^1.2.0",
     "chrono-node": "^2.7.0",
-    "date-fns": "^3.2.0",
+    "date-fns": "^4.3.0",
     "drizzle-orm": "^0.29.3",
     "exifreader": "^4.21.0",
     "fastify": "^4.26.0",
