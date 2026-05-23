@@ -6,7 +6,7 @@ The `ScanOrchestrator` coordinates the complete photo scanning workflow, managin
 
 The orchestrator implements a state machine that guides users through the scanning process:
 
-```
+```text
 idle → scanning_fronts → processing → ready_for_backs →
 scanning_backs → pairing → saving → complete
 ```
@@ -159,6 +159,7 @@ if (!isReady) {
 Start scanning front sides of photos.
 
 **Parameters:**
+
 - `options` (optional): Scan settings
   - `resolution`: 300 or 600 DPI (default: 300)
   - `colorMode`: 'RGB24' or 'Grayscale8' (default: 'RGB24')
@@ -167,6 +168,7 @@ Start scanning front sides of photos.
 **Returns:** `ScanResult` with detected photos
 
 **Throws:**
+
 - `ScannerError`: No scanner found
 - `DetectionError`: No photos detected
 - `ProcessingError`: Enhancement failed
@@ -186,6 +188,7 @@ Pair front and back photos, then save to filesystem.
 **Returns:** `BatchResult` with save details
 
 **Throws:**
+
 - `StorageError`: Failed to save photos
 
 #### `getState(): ScanState`
@@ -201,28 +204,36 @@ Reset orchestrator to idle state. Call this after an error to start fresh.
 The orchestrator integrates with these modules:
 
 ### Scanner Discovery
+
 ```typescript
 import { discoverScanners } from './scanner/discovery';
 ```
+
 - Discovers eSCL scanners on network
 - Fetches scanner capabilities
 
 ### Photo Detection
+
 ```typescript
 import { detectPhotos } from '../detection/photo-detector';
 ```
+
 - Detects 1-4 photos using edge detection
 - Assigns grid positions (top-left, top-right, etc.)
 
 ### Image Enhancement
+
 ```typescript
 import { enhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 ```
+
 - Applies sharpening, normalization, white balance
 - Converts to high-quality JPEG
 
 ### Photo Pairing
+
 Position-based pairing algorithm:
+
 - Matches front/back by grid position
 - Handles missing backs gracefully
 
@@ -258,7 +269,7 @@ try {
 
 Photos are saved with the following structure:
 
-```
+```text
 ./scanned-photos/
   └── {batchId}/
       ├── photo-001-top-left-front.jpg
@@ -286,6 +297,7 @@ const DEFAULT_SCAN_TIMEOUT = 120000; // 2 minutes
 ### Enhancement Preset
 
 Uses `PRESET_STANDARD` by default:
+
 - Normalization: ✓
 - Sharpening: ✓
 - White balance: ✓
@@ -294,6 +306,7 @@ Uses `PRESET_STANDARD` by default:
 ## Examples
 
 See `scan-orchestrator.example.ts` for:
+
 - Full workflow with front/back scanning
 - Fronts-only workflow
 - Event-driven UI integration
@@ -301,6 +314,7 @@ See `scan-orchestrator.example.ts` for:
 ## Future Enhancements
 
 Planned improvements:
+
 - [ ] Resume interrupted batches
 - [ ] Advanced pairing using image similarity
 - [ ] Parallel processing for multiple photos

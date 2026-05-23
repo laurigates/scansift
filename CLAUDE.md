@@ -52,7 +52,7 @@ bun run scanner:test     # Test scan with a discovered scanner
 
 ## Project Structure
 
-```
+```text
 src/
 ├── client/              # React frontend (Vite)
 │   ├── components/      # UI components (ScanButton, PhotoPreview, ScannerStatus)
@@ -93,6 +93,7 @@ scripts/                 # Developer utility scripts
 ## Pre-commit Hooks
 
 Managed by `pre-commit` (Python-based). Hooks run automatically on commit:
+
 1. Trailing whitespace / EOF fixer / YAML/JSON checks
 2. Conventional commit message validation
 3. Biome check (lint + format)

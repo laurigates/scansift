@@ -45,6 +45,7 @@ development hot-reload and the Docker container cold-start.
 ### Fastify as HTTP server
 
 Fastify was chosen over Express and Hono for:
+
 - Schema-based request validation (TypeBox / JSON Schema) with no extra library
 - Official Socket.IO adapter (`@fastify/socket.io`) for real-time progress events
 - Static file serving plugin (`@fastify/static`) to serve the Vite build
@@ -62,12 +63,14 @@ Fastify was chosen over Express and Hono for:
 ## Consequences
 
 ### Positive
+
 - Single `bun install` / `bun run dev` workflow with no separate runtime setup
 - Built-in SQLite removes the need for `better-sqlite3` native bindings
 - Bun's native TypeScript support keeps the source-to-execution path simple
 - Smaller Docker images (bun:alpine vs node:20-alpine + extra tooling)
 
 ### Negative / Risks
+
 - Bun is not yet 1.x stable for all Node.js APIs; some edge cases require workarounds
 - OpenCV.js WASM Promise resolution has a known issue in Bun's test runner
   (workaround: skip those tests in `bun test`, validate in real server context)

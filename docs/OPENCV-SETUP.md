@@ -74,6 +74,7 @@ This document describes the OpenCV.js setup and photo detection algorithm implem
 **Issue**: OpenCV.js WASM initialization doesn't properly resolve Promises in Bun's test environment.
 
 **Symptoms**:
+
 - `initOpenCV()` callback fires correctly
 - `cvModule.Mat` becomes available
 - Promise `resolve()` is called
@@ -83,6 +84,7 @@ This document describes the OpenCV.js setup and photo detection algorithm implem
 **Root Cause**: Appears to be a Bun runtime issue with Promise resolution from WASM `onRuntimeInitialized` callbacks in test context.
 
 **Workaround**:
+
 - Tests are marked with `describe.skip()`
 - Implementation works correctly in production/server context
 - Can be tested with Node.js test runner if needed
@@ -147,6 +149,7 @@ bun run type-check
 ### Test Coverage
 
 The test suite includes:
+
 - Single photo detection
 - Multiple photo detection (2-4 photos)
 - Grid position assignment validation

@@ -94,6 +94,7 @@ bun test --coverage tests/detection/
 ## Performance
 
 Typical processing times (on M1 MacBook Pro):
+
 - 300 DPI image (3000×3000px): ~100-200ms
 - 600 DPI image (6000×6000px): ~400-800ms
 

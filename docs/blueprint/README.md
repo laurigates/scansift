@@ -6,7 +6,7 @@ Format version: **3.3.0** (standalone, no monorepo workspaces).
 
 ## Directory Structure
 
-```
+```text
 docs/
 ├── blueprint/
 │   ├── manifest.json       # Blueprint version, project config, document index, task registry

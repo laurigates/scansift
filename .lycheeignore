@@ -1,0 +1,16 @@
+# Local development URLs
+^https?://localhost
+^https?://127\.0\.0\.1
+^https?://0\.0\.0\.0
+
+# Project-local hostname referenced by PRDs (not reachable from CI)
+^https?://photoscan\.local
+
+# Common docs-only example domains
+^https?://example\.com
+
+# Upstream specification PDFs with broken/stale hosting (referenced as canonical sources):
+# - PWG scanner spec (404 on upstream FTP, content still authoritative)
+# - CIPA EXIF spec (TLS handshake failure, content still authoritative)
+^https?://ftp\.pwg\.org
+^https?://(www\.)?cipa\.jp

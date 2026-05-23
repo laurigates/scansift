@@ -54,7 +54,7 @@ fronts by grid position, and OCR-processed to extract date metadata.
 
 ## Scan Workflow State Machine
 
-```
+```text
 IDLE
   -> SCANNING_FRONTS  (user taps Scan Fronts)
   -> PROCESSING_FRONTS

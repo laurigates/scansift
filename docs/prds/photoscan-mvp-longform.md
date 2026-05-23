@@ -8,7 +8,9 @@
 ## Executive Summary
 
 ### Problem Statement
+
 Digitizing physical photo collections is time-consuming and inefficient with current solutions. Users face multiple pain points:
+
 - **Manual inefficiency**: Scanning photos one at a time is tedious and slow
 - **Physical interruption**: Constantly moving between scanner and computer breaks workflow
 - **Missing context**: Photo backs often contain valuable metadata (dates, names, locations) that gets lost
@@ -16,7 +18,9 @@ Digitizing physical photo collections is time-consuming and inefficient with cur
 - **Disorganization**: Scanned photos require manual sorting and metadata entry
 
 ### Proposed Solution
+
 PhotoScan is a network-enabled batch photo scanning application optimized for efficient, high-quality digitization of physical photo collections. The solution enables:
+
 - **Batch scanning**: Scan 4 photos at once on flatbed scanner
 - **Dual-sided capture**: Automatically guide users to scan both fronts and backs
 - **Mobile-first workflow**: Control scanning from mobile device while staying at scanner
@@ -24,6 +28,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Local privacy**: All processing happens on local network without cloud uploads
 
 ### Business Impact
+
 - **Efficiency gain**: 4x throughput compared to single-photo scanning
 - **Quality improvement**: AI-powered restoration and enhancement
 - **Metadata preservation**: OCR extraction from photo backs captures historical context
@@ -32,6 +37,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 ## Stakeholders & Personas
 
 ### Primary Stakeholders
+
 - **Product Owner**: Responsible for feature prioritization and MVP scope (Accountable)
 - **Engineering Team**: Responsible for implementation (Responsible)
 - **End Users**: Primary users scanning photo collections (Consulted)
@@ -39,6 +45,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 ### User Personas
 
 #### Persona 1: The Family Historian
+
 - **Name**: Sarah, 45-year-old homemaker
 - **Context**: Inherited boxes of family photos spanning 3 generations
 - **Technical Proficiency**: Moderate - comfortable with mobile apps, less so with desktop software
@@ -54,6 +61,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Success Criteria**: Can scan 100+ photos in a focused 1-hour session
 
 #### Persona 2: The Efficiency Optimizer
+
 - **Name**: David, 35-year-old software engineer
 - **Context**: Scanning personal photo collection from childhood/college
 - **Technical Proficiency**: High - comfortable with command-line tools and technical configuration
@@ -83,6 +91,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 #### Epic 1: Batch Scanning Workflow
 
 **US-1.1: As a user, I want to scan 4 photos at once so that I can digitize my collection faster**
+
 - **Acceptance Criteria**:
   - [ ] User can place 4 photos on scanner flatbed in any reasonable arrangement
   - [ ] System detects all 4 photos with 95%+ accuracy
@@ -91,6 +100,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P0 (Must-have for MVP)
 
 **US-1.2: As a user, I want to trigger scans from my phone so that I can stay at the scanner**
+
 - **Acceptance Criteria**:
   - [ ] Web interface loads on mobile devices (iOS Safari, Android Chrome)
   - [ ] Large, touch-friendly "Scan" button accessible from mobile
@@ -99,6 +109,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P0 (Must-have for MVP)
 
 **US-1.3: As a user, I want to scan both fronts and backs of photos so that I preserve handwritten notes**
+
 - **Acceptance Criteria**:
   - [ ] After front scan completes, UI prompts user to flip photos
   - [ ] Visual guide shows photo positions to maintain pairing
@@ -107,6 +118,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P0 (Must-have for MVP)
 
 **US-1.4: As a user, I want clear visual feedback so that I know what's happening during scanning**
+
 - **Acceptance Criteria**:
   - [ ] Progress indicator shows: "Scanning...", "Processing...", "Complete"
   - [ ] Completion notification with count: "4 photos saved"
@@ -117,6 +129,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 #### Epic 2: Image Processing & Enhancement
 
 **US-2.1: As a user, I want photos automatically cropped so that I don't have manual cleanup work**
+
 - **Acceptance Criteria**:
   - [ ] Each photo cropped to edges with <5% margin error
   - [ ] Rotation correction applied (deskew)
@@ -125,6 +138,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P0 for basic crop, P1 for manual adjustment
 
 **US-2.2: As a user, I want faded photos enhanced so that they look better than the originals**
+
 - **Acceptance Criteria**:
   - [ ] Automatic contrast and brightness adjustment
   - [ ] Color restoration for faded vintage photos
@@ -133,6 +147,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P1 (Should-have for MVP)
 
 **US-2.3: As a user, I want scratches and damage removed so that I have clean digital copies**
+
 - **Acceptance Criteria**:
   - [ ] AI-powered scratch removal applied automatically
   - [ ] Dust spot removal
@@ -143,6 +158,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 #### Epic 3: Metadata Extraction & Organization
 
 **US-3.1: As a user, I want dates extracted from photo backs so that I can organize chronologically**
+
 - **Acceptance Criteria**:
   - [ ] OCR extracts printed and handwritten text from backs
   - [ ] Date patterns recognized (MM/DD/YYYY, Month Year, etc.)
@@ -151,6 +167,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P1 (Should-have for MVP)
 
 **US-3.2: As a user, I want names extracted from photo backs so that I can identify people**
+
 - **Acceptance Criteria**:
   - [ ] Text extraction identifies name-like patterns
   - [ ] Names stored in IPTC/EXIF keywords metadata
@@ -159,6 +176,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **Priority**: P2 (Post-MVP)
 
 **US-3.3: As a user, I want photos organized automatically so that I can find them easily**
+
 - **Acceptance Criteria**:
   - [ ] Files organized in folders by year (from extracted dates)
   - [ ] Naming convention: YYYY-MM-DD_NNN_front/back.jpg
@@ -170,7 +188,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 
 #### Primary Journey: Batch Scanning Session
 
-```
+```text
 [User arrives at scanner with box of photos]
          ↓
 [Opens PhotoScan web app on phone/tablet]
@@ -198,7 +216,8 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 [Repeat cycle...]
 ```
 
-#### Pain Points in Journey:
+#### Pain Points in Journey
+
 1. **Position memory**: User must remember/maintain photo positions when flipping
    - *Mitigation*: Visual grid overlay showing numbered positions
 2. **Detection failures**: What if only 3 photos detected?
@@ -211,6 +230,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 ### Core Functionality
 
 #### FR-1: Network Scanner Integration
+
 - **FR-1.1**: System shall discover Epson ET-3750 scanner on local network automatically
 - **FR-1.2**: System shall communicate with scanner using eSCL (AirPrint) protocol as primary method
 - **FR-1.3**: System shall fall back to SANE backend if eSCL unavailable
@@ -219,6 +239,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-1.6**: System shall provide scanner status feedback (ready, busy, error, offline)
 
 #### FR-2: Batch Photo Detection
+
 - **FR-2.1**: System shall detect between 1-4 photos in single flatbed scan
 - **FR-2.2**: System shall use edge detection algorithm to identify photo boundaries
 - **FR-2.3**: System shall handle photos in portrait or landscape orientation
@@ -228,6 +249,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-2.7**: System shall preserve spatial position metadata for front/back pairing
 
 #### FR-3: Front/Back Pairing
+
 - **FR-3.1**: System shall maintain position grid (2x2) for photo placement
 - **FR-3.2**: System shall match front photos to back photos based on grid position
 - **FR-3.3**: System shall handle missing backs (some photos without backs)
@@ -236,8 +258,9 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-3.6**: System shall save front/back pairs with linked filenames
 
 #### FR-4: Web Interface
+
 - **FR-4.1**: System shall provide responsive web UI accessible from mobile devices
-- **FR-4.2**: System shall run web server on local network (http://photoscan.local or IP)
+- **FR-4.2**: System shall run web server on local network (<http://photoscan.local> or IP)
 - **FR-4.3**: System shall provide large touch-friendly buttons (minimum 44x44pt)
 - **FR-4.4**: System shall display real-time scanning progress
 - **FR-4.5**: System shall show preview thumbnails of detected photos
@@ -246,6 +269,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-4.8**: System shall work without internet connection (local-only)
 
 #### FR-5: Image Processing Pipeline
+
 - **FR-5.1**: System shall auto-crop photos to detected boundaries with 2% margin
 - **FR-5.2**: System shall apply automatic rotation/deskew correction
 - **FR-5.3**: System shall apply automatic white balance correction
@@ -255,6 +279,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-5.7**: System shall preserve original unprocessed scan in separate folder
 
 #### FR-6: OCR & Metadata Extraction
+
 - **FR-6.1**: System shall perform OCR on photo backs using Tesseract OCR
 - **FR-6.2**: System shall extract date patterns from OCR text
 - **FR-6.3**: System shall write extracted metadata to EXIF/IPTC tags
@@ -262,6 +287,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 - **FR-6.5**: System shall preserve all extracted text even if not parsed
 
 #### FR-7: File Organization
+
 - **FR-7.1**: System shall organize photos into date-based folder structure
 - **FR-7.2**: System shall use naming convention: `YYYY-MM-DD_SEQ_front.jpg` / `YYYY-MM-DD_SEQ_back.jpg`
 - **FR-7.3**: System shall handle photos without dates (unknown folder)
@@ -272,7 +298,7 @@ PhotoScan is a network-enabled batch photo scanning application optimized for ef
 
 #### Scan Workflow State Machine
 
-```
+```text
 [IDLE]
   ↓ (User taps "Scan Fronts")
 [SCANNING_FRONTS]
@@ -297,6 +323,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 **Approach**: Computer vision edge detection with contour analysis
 
 **Steps**:
+
 1. Convert scan to grayscale
 2. Apply Gaussian blur to reduce noise
 3. Use Canny edge detection to find edges
@@ -310,6 +337,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 **Libraries**: OpenCV.js or @techstark/opencv-js for browser-based processing, or opencv4nodejs for Node.js backend
 
 **Parameters**:
+
 - Minimum photo size: 2" x 2" (1800x1800 pixels at 300 DPI)
 - Maximum photo size: 6" x 6" (5400x5400 pixels at 300 DPI)
 - Edge detection threshold: Canny low=50, high=150
@@ -318,16 +346,19 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Front/Back Pairing Strategy
 
 **Primary Strategy**: Position-based pairing
+
 - Assign grid positions 1-4 (top-left, top-right, bottom-left, bottom-right)
 - Match fronts to backs using same grid position
 - Store position in metadata during detection phase
 
 **Fallback Strategy**: User confirmation
+
 - If detection count mismatch (e.g., 4 fronts but 3 backs), prompt user
 - Show side-by-side preview of questionable pairs
 - Allow manual pairing via drag-and-drop interface
 
 **Edge Cases**:
+
 - Missing backs: Save front-only photos without error
 - Extra photos: Warn user if back scan detects more than front scan
 - Position shift: Allow tolerance of 10% position deviation
@@ -337,23 +368,29 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Internal REST API
 
 **Endpoint**: `POST /api/scan/start`
+
 - **Request**: `{ "type": "front" | "back", "resolution": 300 | 600 }`
 - **Response**: `{ "scanId": "uuid", "status": "scanning" }`
 
 **Endpoint**: `GET /api/scan/status/:scanId`
+
 - **Response**: `{ "status": "scanning" | "processing" | "complete", "progress": 0-100, "photosDetected": 4 }`
 
 **Endpoint**: `GET /api/scan/preview/:scanId`
+
 - **Response**: Array of base64-encoded thumbnail images
 
 **Endpoint**: `POST /api/scan/pair`
+
 - **Request**: `{ "frontScanId": "uuid", "backScanId": "uuid" }`
 - **Response**: `{ "pairedPhotos": 4, "saved": true }`
 
 **Endpoint**: `GET /api/stats`
+
 - **Response**: `{ "totalPhotos": 147, "sessionPhotos": 48, "sessionStartTime": "ISO-8601" }`
 
 **Endpoint**: `GET /api/scanner/status`
+
 - **Response**: `{ "available": true, "model": "Epson ET-3750", "ip": "192.168.1.100" }`
 
 ## Non-Functional Requirements
@@ -418,7 +455,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 
 **System Architecture**: Client-Server with local deployment
 
-```
+```text
 ┌─────────────────────────────────────────────┐
 │  Client Layer (Mobile/Desktop Browser)     │
 │  - Responsive Web UI (React + TypeScript)  │
@@ -452,6 +489,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 ### Technology Stack (TypeScript Full-Stack)
 
 #### Runtime Environment
+
 - **Node.js**: v20.x LTS (Long-term support, current LTS as of January 2025)
   - **Status**: Active, maintained by OpenJS Foundation
   - **Version**: 20.11.0 or later
@@ -460,6 +498,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Backend Stack
 
 **Core Framework & Server**
+
 - **Fastify**: ^4.26.0 (Latest v4 stable)
   - **Status**: Very active, 10k+ commits, maintained by Fastify team
   - **Why**: Fastest Node.js framework, excellent TypeScript support, schema validation
@@ -472,6 +511,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Why**: Fast TypeScript execution for development, ESM support
 
 **Web Server & Real-Time**
+
 - **@fastify/static**: ^7.0.0
   - **Status**: Official Fastify plugin, actively maintained
   - **Why**: Serve static frontend files
@@ -481,6 +521,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Alternative**: socket.io ^4.7.0 if more features needed
 
 **Scanner Communication**
+
 - **ipp**: ^2.0.1 (IPP/eSCL protocol)
   - **Status**: Active, used in CUPS ecosystem
   - **Why**: IPP (Internet Printing Protocol) client for eSCL scanning
@@ -495,6 +536,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Note**: Requires SANE libraries installed on system
 
 **Image Processing**
+
 - **sharp**: ^0.33.2 (Latest stable)
   - **Status**: Very active, 28k+ stars, maintained by Lovell Fuller
   - **Why**: High-performance image processing (libvips), supports resize, crop, color correction
@@ -508,6 +550,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Alternative**: @techstark/opencv-js ^4.9.0-release.1 (WebAssembly, no system deps)
 
 **OCR & Text Extraction**
+
 - **tesseract.js**: ^5.0.4 (Latest stable)
   - **Status**: Very active, 33k+ stars
   - **Why**: Pure JavaScript OCR, no system dependencies
@@ -519,6 +562,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **GitHub**: wanasit/chrono
 
 **Database**
+
 - **better-sqlite3**: ^9.3.0 (Latest stable)
   - **Status**: Very active, maintained by WiseLibs
   - **Why**: Fastest SQLite library for Node.js, synchronous API, full-featured
@@ -530,6 +574,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Alternative**: Kysely ^0.27.0 (type-safe SQL query builder)
 
 **Metadata & EXIF**
+
 - **exifreader**: ^4.21.0 (Latest stable)
   - **Status**: Active, 3.7k+ stars
   - **Why**: Read/write EXIF, IPTC, XMP metadata
@@ -540,6 +585,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **GitHub**: hMatoba/piexifjs
 
 **Utilities**
+
 - **zod**: ^3.22.4 (Schema validation)
   - **Status**: Very active, 30k+ stars
   - **Why**: TypeScript-first schema validation
@@ -555,6 +601,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Frontend Stack
 
 **Framework & Build**
+
 - **React**: ^18.2.0 (Latest stable)
   - **Status**: Very active, maintained by Meta
   - **Why**: Industry standard, excellent ecosystem, hooks API
@@ -567,6 +614,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **GitHub**: vitejs/vite
 
 **UI & Styling**
+
 - **Tailwind CSS**: ^3.4.1 (Latest v3)
   - **Status**: Very active, 78k+ stars
   - **Why**: Utility-first CSS, mobile-first, excellent DX
@@ -578,6 +626,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Components**: @radix-ui/react-dialog, @radix-ui/react-progress, etc.
 
 **State Management**
+
 - **Zustand**: ^4.5.0 (Latest stable)
   - **Status**: Very active, 43k+ stars
   - **Why**: Simple, minimal boilerplate, excellent TypeScript support
@@ -585,12 +634,14 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Alternative**: TanStack Query ^5.17.0 for server state
 
 **Real-Time Communication**
+
 - **socket.io-client**: ^4.7.0
   - **Status**: Very active, maintained by Socket.IO team
   - **Why**: Real-time bidirectional communication
   - **GitHub**: socketio/socket.io
 
 **HTTP Client**
+
 - **ky**: ^1.2.0
   - **Status**: Active, modern fetch wrapper
   - **Why**: Better than axios for modern browsers, tiny size
@@ -598,6 +649,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Alternative**: @tanstack/react-query ^5.17.0 includes fetching
 
 **Utilities**
+
 - **date-fns**: ^3.2.0 (Latest v3)
   - **Status**: Very active, 33k+ stars
   - **Why**: Modern date utility library, tree-shakeable
@@ -606,6 +658,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Development Tools
 
 **Build & Bundling**
+
 - **tsup**: ^8.0.1
   - **Status**: Active, modern TypeScript bundler
   - **Why**: Bundle backend TypeScript for distribution
@@ -615,6 +668,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Why**: Extremely fast JavaScript bundler
 
 **Testing**
+
 - **Vitest**: ^1.2.0
   - **Status**: Very active, by Vite team
   - **Why**: Fast, Vite-native test runner, Jest-compatible API
@@ -628,6 +682,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **GitHub**: microsoft/playwright
 
 **Code Quality**
+
 - **ESLint**: ^8.56.0
   - **Status**: Active, standard linting tool
   - **Why**: Code quality and consistency
@@ -643,6 +698,7 @@ Error states at any stage → [ERROR] → Can retry or skip
   - **Why**: Enforce quality gates via Git hooks
 
 **Package Management**
+
 - **pnpm**: ^8.15.0 (Recommended)
   - **Status**: Very active, 28k+ stars
   - **Why**: Fast, efficient, strict (prevents phantom dependencies)
@@ -651,6 +707,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 #### Electron Integration (Optional for Desktop App)
 
 **Desktop Distribution**
+
 - **Electron**: ^28.2.0 (Latest stable)
   - **Status**: Very active, maintained by OpenJS Foundation
   - **Why**: Cross-platform desktop apps with web technologies
@@ -684,6 +741,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 | **E2E Testing** | Playwright | ^1.41.0 | Very Active | 61k+ | Jan 2024 |
 
 **All dependencies verified as:**
+
 - Actively maintained (commits within last 3 months)
 - Major version stable (no breaking changes expected)
 - Strong TypeScript support
@@ -692,12 +750,14 @@ Error states at any stage → [ERROR] → Can retry or skip
 ### Scanner Communication Strategy
 
 **Primary Method: eSCL (AirPrint Scanning)**
+
 - Epson ET-3750 supports eSCL protocol (driverless scanning)
 - HTTP-based protocol, works across platforms
 - No vendor drivers required
 - Implementation: Use `ipp` package to send HTTP requests
 
 **eSCL Workflow**:
+
 1. Discover scanner via mDNS/Bonjour (`bonjour-service` package)
 2. Query scanner capabilities: `GET /eSCL/ScannerCapabilities`
 3. Create scan job: `POST /eSCL/ScanJobs` with XML settings
@@ -705,6 +765,7 @@ Error states at any stage → [ERROR] → Can retry or skip
 5. Download scan: `GET /eSCL/ScanJobs/{jobId}/NextDocument`
 
 **TypeScript Implementation**:
+
 ```typescript
 import ipp from 'ipp';
 import Bonjour from 'bonjour-service';
@@ -730,12 +791,14 @@ const scanSettings = `<?xml version="1.0" encoding="UTF-8"?>
 ```
 
 **Fallback Method: SANE (Scanner Access Now Easy)**
+
 - Cross-platform scanner backend
 - Requires installation of SANE libraries and Epson backend
 - Use `node-sane` package (TypeScript bindings available)
 - Command-line fallback: spawn `scanimage` utility
 
 **Platform-Specific Notes**:
+
 - **macOS**: eSCL works natively, SANE via Homebrew (`brew install sane-backends`)
 - **Linux**: SANE native, eSCL via `ipp-usb` or `sane-airscan`
 - **Windows**: eSCL via WIA, SANE via Windows port (more complex)
@@ -745,6 +808,7 @@ const scanSettings = `<?xml version="1.0" encoding="UTF-8"?>
 #### Scanner Integration (eSCL Protocol)
 
 **Discovery**:
+
 ```typescript
 import Bonjour from 'bonjour-service';
 
@@ -780,6 +844,7 @@ const discoverScanners = async (): Promise<ScannerService[]> => {
 ```
 
 **Scanning**:
+
 ```typescript
 interface ScanOptions {
   resolution: 300 | 600;
@@ -811,7 +876,8 @@ const initiateScan = async (
 #### File System Integration
 
 **Output Directory Structure**:
-```
+
+```text
 ~/PhotoScan/
 ├── config/
 │   └── settings.json          # User preferences
@@ -834,6 +900,7 @@ const initiateScan = async (
 ```
 
 **TypeScript Path Utilities**:
+
 ```typescript
 import { join } from 'node:path';
 import { homedir } from 'node:os';
@@ -893,6 +960,7 @@ export type ScanSession = typeof scanSessions.$inferSelect;
 ```
 
 **Database Operations**:
+
 ```typescript
 import Database from 'better-sqlite3';
 import { drizzle } from 'drizzle-orm/better-sqlite3';
@@ -917,6 +985,7 @@ const getPhotos = () => {
 ### Key Performance Indicators (KPIs)
 
 #### Efficiency Metrics
+
 - **KPI-1.1**: Throughput - Photos scanned per hour
   - **Target**: 100+ photos/hour (4 photos every ~2.5 minutes)
   - **Measurement**: Track completion timestamps in database
@@ -929,6 +998,7 @@ const getPhotos = () => {
   - **Measurement**: User surveys and workflow observation
 
 #### Quality Metrics
+
 - **KPI-2.1**: Photo detection accuracy
   - **Target**: 95%+ correct detection (4/4 photos detected)
   - **Measurement**: Log detection failures, user feedback
@@ -943,6 +1013,7 @@ const getPhotos = () => {
   - **Data Source**: Photos table, date field population rate
 
 #### Usability Metrics
+
 - **KPI-3.1**: First-scan success rate
   - **Target**: 80%+ of users complete first scan without help
   - **Measurement**: Analytics tracking, user surveys
@@ -957,6 +1028,7 @@ const getPhotos = () => {
 ### Measurement Methodology and Data Sources
 
 #### Instrumentation
+
 - **Event Tracking**: Log all key events with timestamps using Pino logger
   - Scan start/complete
   - Processing start/complete
@@ -974,6 +1046,7 @@ const getPhotos = () => {
   - Feature usage (settings changes, manual overrides)
 
 #### Data Collection
+
 - **Database**: SQLite tables for structured data
   - Photos table: Detection and pairing outcomes
   - Sessions table: Throughput and timing data
@@ -987,6 +1060,7 @@ const getPhotos = () => {
 ### Success Criteria and Thresholds
 
 #### MVP Success Criteria
+
 - **Must Achieve**:
   - 100+ photos scanned per hour throughput
   - 95%+ photo detection accuracy
@@ -1003,16 +1077,19 @@ const getPhotos = () => {
 #### Quality Metrics
 
 **Performance**:
+
 - **Response time**: 95th percentile scan-to-preview < 20 seconds
 - **Uptime**: 99%+ during scanning sessions
 - **Resource usage**: <50% CPU average, <2GB RAM
 
 **Reliability**:
+
 - **Error recovery**: 100% of errors have clear user-actionable messages
 - **Data integrity**: 0% photo loss (all scans saved even if processing fails)
 - **Crash rate**: <0.1% of scan operations
 
 **Usability**:
+
 - **Mobile responsiveness**: <100ms touch response time
 - **Accessibility**: WCAG 2.1 AA compliance
 - **Learning curve**: 80%+ first-time users successful within 5 minutes
@@ -1020,11 +1097,13 @@ const getPhotos = () => {
 #### Business Metrics
 
 **Adoption**:
+
 - **User retention**: 70%+ of users complete second scanning session
 - **Session size**: Average 50+ photos per session
 - **Completion rate**: 60%+ of started collections fully digitized
 
 **Engagement**:
+
 - **Weekly active users**: Track for multi-user deployments
 - **Feature usage**: 30%+ users adjust settings/preferences
 - **Recommendation**: 80%+ Net Promoter Score (NPS)
@@ -1032,11 +1111,13 @@ const getPhotos = () => {
 #### Technical Metrics
 
 **Code Quality**:
+
 - **Test coverage**: 80%+ code coverage for core scanning logic
 - **Performance tests**: All API endpoints < 2 second response time
 - **Error handling**: 100% of user-facing functions have try/catch
 
 **Operational**:
+
 - **Error rates**: <1% of scan operations fail
 - **Response times**: 90th percentile API response < 500ms
 - **Uptime**: 99.9% application availability during active hours
@@ -1046,6 +1127,7 @@ const getPhotos = () => {
 ### Explicitly Excluded Features
 
 #### MVP Exclusions (Future Enhancements)
+
 1. **Advanced AI Restoration**:
    - Deep learning scratch removal
    - AI-powered colorization of black & white photos
@@ -1087,6 +1169,7 @@ const getPhotos = () => {
    - *Rationale*: MVP focused on specific hardware (Epson ET-3750 flatbed)
 
 #### Permanent Exclusions
+
 1. **Mobile Scanning**: Using phone camera instead of scanner
    - *Rationale*: Different problem domain, quality concerns
 2. **Video Digitization**: Scanning video tapes or film
@@ -1097,24 +1180,28 @@ const getPhotos = () => {
 ### Future Considerations (Post-MVP Roadmap)
 
 #### Phase 2: Enhanced Processing (3-6 months post-MVP)
+
 - Advanced AI restoration using pre-trained models
 - Scratch and damage removal
 - Color restoration for severely faded photos
 - Configurable processing presets (light/medium/heavy enhancement)
 
 #### Phase 3: Organization & Metadata (6-9 months post-MVP)
+
 - Name extraction and face recognition
 - Event detection and smart grouping
 - Advanced search by date, people, keywords
 - Timeline visualization
 
 #### Phase 4: Sharing & Export (9-12 months post-MVP)
+
 - Cloud backup integration (optional)
 - Photo book PDF generation
 - Export to common formats (Google Photos, Apple Photos)
 - Sharing links for family members
 
 #### Phase 5: Extended Hardware Support (12+ months post-MVP)
+
 - ADF (Automatic Document Feeder) batch scanning
 - Support for multiple scanner models
 - USB scanner support
@@ -1125,13 +1212,16 @@ const getPhotos = () => {
 ### Development Phases
 
 #### Phase 0: Research & Prototyping (2 weeks)
+
 **Objectives**:
+
 - Validate eSCL communication with Epson ET-3750
 - Prototype photo detection algorithm with sample scans
 - Verify all dependencies work together
 - Create basic scanner discovery proof-of-concept
 
 **Deliverables**:
+
 - Working scanner communication demo (TypeScript)
 - Photo detection accuracy report (test with 20+ sample scans)
 - Verified technology stack (all dependencies installed and working)
@@ -1140,6 +1230,7 @@ const getPhotos = () => {
 **Team**: 1 engineer
 
 **Key Tasks**:
+
 - Set up TypeScript project with Fastify + Vite
 - Test `ipp` package with Epson ET-3750
 - Test `sharp` image processing pipeline
@@ -1147,13 +1238,16 @@ const getPhotos = () => {
 - Validate `opencv4nodejs` installation and photo detection
 
 #### Phase 1: Core Scanning Infrastructure (4 weeks)
+
 **Objectives**:
+
 - Implement scanner discovery and communication
 - Build scan initiation and status tracking
 - Create basic photo detection and cropping
 - Set up project structure and build system
 
 **Deliverables**:
+
 - Functional scanner integration (eSCL + fallback to SANE)
 - Photo detection with 90%+ accuracy
 - File saving and basic organization
@@ -1162,19 +1256,23 @@ const getPhotos = () => {
 **Team**: 1-2 engineers
 
 **Success Criteria**:
+
 - Can scan 4 photos and save as separate files
 - Scanner discovery works on macOS (primary platform)
 - Detection handles various photo orientations
 - All core modules have TypeScript types
 
 #### Phase 2: Web Interface & Real-Time Feedback (3 weeks)
+
 **Objectives**:
+
 - Build responsive web UI with React + TypeScript
 - Implement real-time status updates via Socket.IO
 - Create mobile-optimized scanning workflow
 - Add preview thumbnail generation
 
 **Deliverables**:
+
 - Mobile-friendly web interface (Tailwind CSS + Radix UI)
 - Real-time progress indicators
 - Preview thumbnails after scanning
@@ -1183,19 +1281,23 @@ const getPhotos = () => {
 **Team**: 1 frontend engineer, 1 backend engineer
 
 **Success Criteria**:
+
 - Web UI loads in <1 second on local network
 - Touch targets meet 44x44pt minimum
 - Real-time updates work reliably
 - TypeScript coverage 100% for frontend
 
 #### Phase 3: Front/Back Pairing & Processing Pipeline (3 weeks)
+
 **Objectives**:
+
 - Implement position-based front/back pairing
 - Build image enhancement pipeline (Sharp.js)
 - Add OCR for photo backs (Tesseract.js)
 - Create metadata extraction logic (date parsing with chrono-node)
 
 **Deliverables**:
+
 - Automatic front/back pairing with visual guide
 - Basic image enhancement (crop, rotate, white balance via Sharp)
 - OCR with date extraction
@@ -1204,19 +1306,23 @@ const getPhotos = () => {
 **Team**: 1-2 engineers
 
 **Success Criteria**:
+
 - 90%+ pairing accuracy in testing
 - Date extraction works for common formats
 - Image quality improvements visible in A/B tests
 - All processing modules fully typed
 
 #### Phase 4: Testing, Polish & Documentation (2 weeks)
+
 **Objectives**:
+
 - End-to-end testing on all platforms
 - User acceptance testing with target personas
 - Performance optimization
 - Documentation and setup guides
 
 **Deliverables**:
+
 - Comprehensive test suite (Vitest + Playwright, 80%+ coverage)
 - User manual and quick start guide
 - Installation scripts for all platforms
@@ -1225,19 +1331,23 @@ const getPhotos = () => {
 **Team**: 1 engineer, 2-3 beta testers
 
 **Success Criteria**:
+
 - All acceptance criteria met for P0 user stories
 - Installation works on clean macOS, Linux, Windows systems
 - UAT participants rate usability 4.0+/5.0
 - TypeScript strict mode enabled, zero `any` types
 
 #### Phase 5: MVP Release (1 week)
+
 **Objectives**:
+
 - Package application for distribution
 - Create release documentation
 - Set up issue tracking and support
 - Plan Phase 2 features based on feedback
 
 **Deliverables**:
+
 - Packaged application for all platforms (or web-only for MVP)
 - Release notes and changelog
 - Support documentation and FAQ
@@ -1248,11 +1358,13 @@ const getPhotos = () => {
 ### Resource Requirements
 
 #### Team Composition
+
 - **Minimum (MVP)**: 1 full-stack TypeScript engineer (14 weeks)
 - **Optimal**: 2 engineers (1 backend/infra, 1 frontend/UX) (10-12 weeks)
 - **Beta Testers**: 3-5 users matching target personas
 
 #### Infrastructure
+
 - **Development**:
   - Epson ET-3750 scanner for testing (hardware requirement)
   - Network setup (router with mDNS support)
@@ -1260,6 +1372,7 @@ const getPhotos = () => {
 - **Deployment**: Self-hosted on user's local machine (no cloud infrastructure)
 
 #### External Dependencies
+
 - All dependencies are open-source (MIT/Apache licenses)
 - System dependencies: Node.js 20.x, OpenCV libraries (optional)
 
@@ -1300,6 +1413,7 @@ const getPhotos = () => {
 ### Assumptions and Dependencies
 
 #### Key Assumptions
+
 1. **Hardware**: Users have Epson ET-3750 or compatible eSCL scanner
 2. **Network**: Scanner and computer on same local network with mDNS
 3. **Photos**: Standard print sizes (3x5", 4x6", 5x7"), placed flat on scanner
@@ -1308,6 +1422,7 @@ const getPhotos = () => {
 6. **Storage**: Users have adequate disk space (50GB+ for large collections)
 
 #### External Dependencies
+
 - **Scanner Availability**: Epson ET-3750 available for testing
 - **Open Source Libraries**: All packages actively maintained
 - **Platform Support**: mDNS/Bonjour available on target OSes
@@ -1317,6 +1432,7 @@ const getPhotos = () => {
 ### Go/No-Go Criteria
 
 #### Prerequisites for MVP Launch
+
 - [ ] Scanner communication works reliably on macOS, Linux, Windows
 - [ ] Photo detection accuracy ≥95% on test dataset (100+ scans)
 - [ ] Front/back pairing accuracy ≥90% on test dataset
@@ -1329,6 +1445,7 @@ const getPhotos = () => {
 - [ ] Test coverage ≥80% for core modules
 
 #### Success Indicators Post-Launch
+
 - [ ] 70%+ of users complete second scanning session (retention)
 - [ ] 80%+ of users successfully scan 50+ photos in first week
 - [ ] <10% support requests per active user
@@ -1339,6 +1456,7 @@ const getPhotos = () => {
 ### CI/CD Pipeline Requirements
 
 #### Continuous Integration
+
 - **Build Automation**: GitHub Actions for automated builds
   - Matrix builds for Node.js 20.x on macOS, Linux, Windows
   - Run unit tests (Vitest) and integration tests
@@ -1354,6 +1472,7 @@ const getPhotos = () => {
   - Pre-commit hooks via Husky + lint-staged
 
 **Example GitHub Actions Workflow**:
+
 ```yaml
 name: CI
 on: [push, pull_request]
@@ -1378,6 +1497,7 @@ jobs:
 ```
 
 #### Continuous Delivery
+
 - **Packaging**: Automated packaging for distribution
   - Web app: Static build output (Vite)
   - Optional Electron: electron-builder for installers
@@ -1392,27 +1512,33 @@ jobs:
 #### Installation Methods
 
 **Web Application (MVP)**:
+
 - **Prerequisites**: Node.js 20.x installed
 - **Installation**:
+
   ```bash
   npx photoscan@latest
   # Or
   pnpm create photoscan
   ```
-- **First-Run**: Opens browser to http://localhost:3000
+
+- **First-Run**: Opens browser to <http://localhost:3000>
 
 **Desktop Application (Post-MVP)**:
+
 - **macOS**: `.dmg` installer
 - **Linux**: `.AppImage` or `.deb`/`.rpm` packages
 - **Windows**: `.exe` installer
 
 #### First-Run Setup
+
 - **Scanner Discovery**: Auto-discover scanner on launch
 - **Output Directory**: Prompt for photo storage location
 - **Quick Tutorial**: 30-second interactive walkthrough
 - **Settings**: Pre-configured defaults (300 DPI, JPEG quality 92%)
 
 #### Upgrade Path
+
 - **Auto-Update Check**: Check npm registry for updates
 - **In-Place Upgrade**: `pnpm update photoscan`
 - **Migration**: Automatic database schema migrations via Drizzle Kit
@@ -1421,6 +1547,7 @@ jobs:
 ### Monitoring and Alerting Needs
 
 #### Application Monitoring
+
 - **Error Tracking**: Capture and log all errors via Pino
   - Structured JSON logs
   - Error frequency and patterns
@@ -1435,6 +1562,7 @@ jobs:
   - Error rates and types
 
 #### Logging Strategy
+
 - **Structured Logging**: Pino with JSON output
   - Timestamp, log level, module, message, context
 - **Log Rotation**: Prevent disk space exhaustion
@@ -1447,6 +1575,7 @@ jobs:
   - DEBUG: Detailed troubleshooting information (disabled by default)
 
 **Example Logging**:
+
 ```typescript
 import pino from 'pino';
 
@@ -1463,6 +1592,7 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
 ```
 
 #### Health Checks
+
 - **Scanner Connectivity**: Periodic ping to scanner
   - Alert if scanner offline >5 minutes during active session
 - **Disk Space**: Monitor available storage
@@ -1471,6 +1601,7 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
 - **Process Health**: Ensure background workers running
 
 #### User-Facing Status
+
 - **System Status Page**: Simple UI showing health
   - Scanner status (online/offline)
   - Disk space available
@@ -1482,6 +1613,7 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
 ### Documentation Requirements
 
 #### User Documentation
+
 - **Quick Start Guide**: Single-page getting started
   - Installation steps (Node.js + pnpm)
   - First scan walkthrough
@@ -1494,6 +1626,7 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
 - **API Documentation**: TypeDoc-generated API reference
 
 #### Technical Documentation
+
 - **API Reference**: Document all REST endpoints (OpenAPI/Swagger)
   - Request/response formats
   - Error codes and meanings
@@ -1508,6 +1641,7 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
   - How to add new scanner support
 
 #### Operations Documentation
+
 - **Installation Guide**: Platform-specific setup
   - Prerequisites (Node.js, system libraries)
   - Installation steps
@@ -1550,22 +1684,26 @@ logger.error({ err: error, scanId: '123' }, 'Scanner communication failed');
 ### References
 
 **Scanner Protocol Documentation**:
+
 - eSCL Specification: [PWG 5108.5 - IPP Scan Service](https://ftp.pwg.org/pub/pwg/candidates/cs-ipscan10-20140918-5108.5.pdf)
 - SANE Documentation: [sane-project.org](http://www.sane-project.org/)
 - IPP Everywhere: [PWG 5100.14](https://ftp.pwg.org/pub/pwg/candidates/cs-ippeve10-20130128-5100.14.pdf)
 
 **Image Processing**:
+
 - Sharp Documentation: [sharp.pixelplumbing.com](https://sharp.pixelplumbing.com/)
 - OpenCV.js: [docs.opencv.org/4.x/d5/d10/tutorial_js_root.html](https://docs.opencv.org/4.x/d5/d10/tutorial_js_root.html)
 - Tesseract.js: [github.com/naptha/tesseract.js](https://github.com/naptha/tesseract.js)
 
 **TypeScript & Node.js**:
+
 - TypeScript Handbook: [typescriptlang.org/docs](https://www.typescriptlang.org/docs/)
 - Node.js Documentation: [nodejs.org/docs](https://nodejs.org/docs/)
 - Fastify Documentation: [fastify.dev](https://fastify.dev/)
 - Drizzle ORM: [orm.drizzle.team](https://orm.drizzle.team/)
 
 **Standards**:
+
 - EXIF 2.32 Specification: [CIPA Standards](https://www.cipa.jp/std/documents/e/DC-008-Translation-2019-E.pdf)
 - IPTC Photo Metadata: [iptc.org/standards/photo-metadata](https://iptc.org/standards/photo-metadata/)
 - WCAG 2.1 Accessibility: [w3.org/WAI/WCAG21](https://www.w3.org/WAI/WCAG21/quickref/)

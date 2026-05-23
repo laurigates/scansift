@@ -3,6 +3,7 @@
 ## Current Phase: Phase 2 - Web Interface
 
 ### Completed
+
 - ✅ Blueprint Development initialized
 - ✅ PRD created: `prds/photoscan-mvp.md`
 - ✅ Project-specific skills generated
@@ -46,6 +47,7 @@
   - Confidence score indicators (color-coded)
 
 ### In Progress
+
 - ⏳ Phase 4: End-to-end testing
   - ✅ Integration test suite (PR #20 / commit 1c49afe)
     - Full-scan-flow integration tests: `tests/integration/full-scan-flow.test.ts` (288 LoC)
@@ -54,11 +56,12 @@
   - ⏹️ Final polish
 
 ### Pending
+
 - ⏹️ Phase 5: MVP release & documentation
 
 ## Project Structure Created
 
-```
+```text
 photoscan/
 ├── src/
 │   ├── server/           # Fastify backend
@@ -89,6 +92,7 @@ photoscan/
 ```
 
 ## Next Steps
+
 1. ~~Prototype photo detection algorithm~~ ✅ Done (Sharp-based)
 2. ~~Implement contour detection for multiple photos~~ ✅ Done (edge projection)
 3. ~~Test detection accuracy with photo arrangements~~ ✅ Done (4 photos detected)
@@ -104,6 +108,7 @@ photoscan/
    - Final quality pass
 
 ## Scanner Commands
+
 ```bash
 # Discover scanners on network
 bun run scanner:discover
