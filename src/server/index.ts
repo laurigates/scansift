@@ -11,9 +11,10 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fastifyStatic from '@fastify/static';
 import { SERVER, TIMEOUTS } from '@shared/constants';
+import { count, eq, gte } from 'drizzle-orm';
 import Fastify from 'fastify';
 import fastifySocketIO from 'fastify-socket.io';
-import { createDb } from './db';
+import { batches, createDb, photos } from './db';
 import { logger } from './logger';
 import { registerRoutes } from './routes';
 import { createScanOrchestrator } from './services/scan-orchestrator';
@@ -25,6 +26,10 @@ export const createApp = async () => {
   const app = Fastify({
     logger: true,
   });
+
+  // Server-process start time defines the "session" boundary for /api/stats —
+  // photos from batches started after this point count as session photos.
+  const sessionStartTime = new Date();
 
   // Register Socket.IO support
   await app.register(fastifySocketIO, {
@@ -62,13 +67,22 @@ export const createApp = async () => {
     return { status: 'ok', timestamp: new Date().toISOString() };
   });
 
-  // Session stats endpoint (placeholder)
+  // Session stats endpoint — counts come from the photos table directly.
+  // Session photos are scoped to batches started after the server boot time.
   app.get('/api/stats', async () => {
-    // TODO: Implement actual stats from database
+    const [totalRow] = app.db.select({ value: count() }).from(photos).all();
+    const sessionStartIso = sessionStartTime.toISOString();
+    const [sessionRow] = app.db
+      .select({ value: count() })
+      .from(photos)
+      .innerJoin(batches, eq(photos.batchId, batches.id))
+      .where(gte(batches.startedAt, sessionStartIso))
+      .all();
+
     return {
-      totalPhotos: 0,
-      sessionPhotos: 0,
-      sessionStartTime: new Date().toISOString(),
+      totalPhotos: totalRow?.value ?? 0,
+      sessionPhotos: sessionRow?.value ?? 0,
+      sessionStartTime: sessionStartIso,
     };
   });
 
