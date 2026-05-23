@@ -85,7 +85,7 @@ bun run start    # Run production build
 
 ## Project Structure
 
-```
+```text
 src/
 ├── client/           # React frontend
 │   ├── components/   # UI components

@@ -39,6 +39,8 @@ jobs:
             !coverage
             !dist
             !CHANGELOG.md
+            !.claude
+            !tmp
 
   link-check:
     runs-on: ubuntu-latest

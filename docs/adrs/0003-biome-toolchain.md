@@ -75,6 +75,7 @@ project-wide type-checking rules) are acceptable for a single-developer project.
 ## Consequences
 
 ### Positive
+
 - One install, one config file, one CLI command (`biome check`, `biome format`)
 - Fast enough to run as a pre-commit check without lint-staged tooling
 - No ESLint/Prettier version conflicts or plugin compatibility matrix to manage
@@ -82,6 +83,7 @@ project-wide type-checking rules) are acceptable for a single-developer project.
 - Tailwind `@apply` / `@layer` directives parsed without a separate PostCSS plugin
 
 ### Negative / Risks
+
 - Biome's lint rule coverage is narrower than the full ESLint ecosystem; some
   advanced rules (e.g., complex import-graph analysis) are unavailable
 - Biome 2.x is relatively new; occasional rule changes may appear in minor releases

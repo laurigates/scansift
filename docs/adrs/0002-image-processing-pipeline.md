@@ -92,12 +92,14 @@ Handwriting recognition accuracy is lower than printed text. This is documented 
 ## Consequences
 
 ### Positive
+
 - Zero system dependencies beyond Bun itself (no OpenCV system libs, no `tesseract` binary)
 - Pipeline is self-contained and works identically on macOS, Linux, and in Docker
 - Sharp's libvips performance meets the 15s detection + processing budget comfortably
 - WASM-based libraries (OpenCV.js, Tesseract.js) are portable across architectures
 
 ### Negative / Risks
+
 - WASM modules add to startup time (~200-400ms for OpenCV.js initialization)
   Mitigated by: singleton initialization on server start, not per-request
 - Sharp native binary must match the host platform; the Docker build pins to linux-musl
