@@ -19,6 +19,7 @@ import type { ScanOrchestrator } from '../services/scan-orchestrator';
 interface ClientToServerEvents {
   'scan:start': (data: { scanType: 'front' | 'back' }) => void;
   'scan:cancel': (data: { scanId: string }) => void;
+  'scan:skip-backs': () => void;
 }
 
 /**
@@ -86,8 +87,30 @@ export const initializeSocketHandler = (
     });
 
     // Handle scan:cancel event
-    socket.on('scan:cancel', ({ scanId }) => {
-      logger.warn({ socketId: socket.id, scanId }, 'Scan cancellation not yet implemented');
+    socket.on('scan:cancel', async ({ scanId }) => {
+      logger.info({ socketId: socket.id, scanId }, 'Received scan:cancel request');
+      try {
+        const cancelled = await orchestrator.cancelScan(scanId);
+        if (!cancelled) {
+          logger.debug({ scanId }, 'scan:cancel — no active scan matched scanId');
+        }
+      } catch (error) {
+        logger.error({ socketId: socket.id, scanId, err: error }, 'Scan cancellation failed');
+      }
+    });
+
+    // Handle scan:skip-backs event — skip the back-scanning stage and pair
+    // fronts only. Safe to call from ready_for_backs or scanning_backs states.
+    socket.on('scan:skip-backs', async () => {
+      logger.info({ socketId: socket.id }, 'Received scan:skip-backs request');
+      try {
+        const skipped = await orchestrator.skipBacks();
+        if (!skipped) {
+          logger.debug('scan:skip-backs called from an invalid state — ignored');
+        }
+      } catch (error) {
+        logger.error({ socketId: socket.id, err: error }, 'Skip-backs failed');
+      }
     });
 
     // Handle disconnection

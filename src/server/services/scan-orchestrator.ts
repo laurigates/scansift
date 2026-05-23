@@ -37,6 +37,7 @@ import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
 // Import existing modules
 import {
   type DiscoveredScanner,
+  cancelScanJob as defaultCancelScanJob,
   discoverScanners as defaultDiscoverScanners,
   performScan as defaultEsclPerformScan,
   type ScanProgressCallback,
@@ -52,6 +53,7 @@ export interface OrchestratorDependencies {
   detectPhotos?: typeof defaultDetectPhotos;
   enhancePhoto?: typeof defaultEnhancePhoto;
   extractMetadata?: typeof defaultExtractMetadata;
+  cancelScanJob?: typeof defaultCancelScanJob;
 }
 
 /**
@@ -97,6 +99,17 @@ export class ScanOrchestrator extends EventEmitter {
   private detectPhotos: typeof defaultDetectPhotos;
   private enhancePhoto: typeof defaultEnhancePhoto;
   private extractMetadata: typeof defaultExtractMetadata;
+  private cancelScanJob: typeof defaultCancelScanJob;
+
+  /**
+   * Registry of in-flight scan jobs, keyed by scanId.
+   *
+   * Populated when the eSCL job URL becomes available (via the
+   * onJobCreated callback to performScan) and cleared when the scan
+   * completes, errors, or is cancelled. Used by cancelScan() to
+   * dispatch an eSCL DELETE against the active job.
+   */
+  private activeScans = new Map<string, { jobUrl: string }>();
 
   constructor(options?: {
     scanTimeout?: number;
@@ -111,6 +124,7 @@ export class ScanOrchestrator extends EventEmitter {
     this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
     this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
+    this.cancelScanJob = options?.deps?.cancelScanJob ?? defaultCancelScanJob;
   }
 
   /**
@@ -502,17 +516,96 @@ export class ScanOrchestrator extends EventEmitter {
       this.emit('scan:progress', scanId, overallProgress);
     };
 
-    // Perform the actual scan using eSCL protocol
-    const imageBuffer = await this.esclPerformScan(
-      scanner,
-      options,
-      this.scanTimeout,
-      progressCallback,
-    );
+    // Register the job URL in the active-scans map as soon as the eSCL
+    // job is created so cancelScan() can dispatch an eSCL DELETE against it.
+    const onJobCreated = (jobUrl: string) => {
+      this.activeScans.set(scanId, { jobUrl });
+    };
 
-    logger.info({ scanId, sizeMB: (imageBuffer.length / 1024 / 1024).toFixed(2) }, 'Scan complete');
+    try {
+      // Perform the actual scan using eSCL protocol
+      const imageBuffer = await this.esclPerformScan(
+        scanner,
+        options,
+        this.scanTimeout,
+        progressCallback,
+        onJobCreated,
+      );
 
-    return imageBuffer;
+      logger.info(
+        { scanId, sizeMB: (imageBuffer.length / 1024 / 1024).toFixed(2) },
+        'Scan complete',
+      );
+
+      return imageBuffer;
+    } finally {
+      this.activeScans.delete(scanId);
+    }
+  }
+
+  /**
+   * Cancel an in-flight scan by scanId.
+   *
+   * Dispatches an eSCL DELETE against the registered job URL (best-effort)
+   * and resets the orchestrator to idle state. Safe to call when no scan
+   * matches the scanId — that path is a no-op.
+   *
+   * @returns true if a matching scan was cancelled, false if the scanId
+   *          was not in the active-scans registry.
+   */
+  async cancelScan(scanId: string): Promise<boolean> {
+    const active = this.activeScans.get(scanId);
+    if (!active) {
+      logger.debug({ scanId }, 'cancelScan called for unknown scanId');
+      return false;
+    }
+
+    logger.info({ scanId, jobUrl: active.jobUrl }, 'Cancelling scan');
+
+    // Best-effort cancel — cancelScanJob never throws (see escl-client.ts)
+    await this.cancelScanJob(active.jobUrl);
+
+    this.activeScans.delete(scanId);
+
+    // Move back to idle so the UI can start fresh. The in-flight performScan
+    // call will reject on the next scanner interaction and its catch handler
+    // will become a no-op since the state already shows idle.
+    this.updateState({ status: 'idle' });
+    this.emit('scan:error', scanId, new Error('Scan cancelled by user'));
+
+    return true;
+  }
+
+  /**
+   * Skip the back-scanning stage entirely and proceed straight to pairing
+   * with the front scans only. Valid transitions:
+   *   ready_for_backs  → pairing (front-only pairs)
+   *   scanning_backs   → cancels the in-flight back scan first, then pairs
+   *
+   * @returns true if skipBacks transitioned the state, false otherwise
+   *          (e.g., wrong state, no front scan result).
+   */
+  async skipBacks(): Promise<boolean> {
+    const currentStatus = this.state.status;
+    if (currentStatus !== 'ready_for_backs' && currentStatus !== 'scanning_backs') {
+      logger.warn(
+        { state: currentStatus },
+        'skipBacks called from an invalid state — must be ready_for_backs or scanning_backs',
+      );
+      return false;
+    }
+
+    // If a back scan is in flight, cancel its eSCL job first. We reuse the
+    // active-scans registry — there should be at most one entry, but defend
+    // against odd states by iterating.
+    for (const [scanId, { jobUrl }] of this.activeScans) {
+      logger.info({ scanId, jobUrl }, 'skipBacks: cancelling in-flight back scan');
+      await this.cancelScanJob(jobUrl);
+      this.activeScans.delete(scanId);
+    }
+
+    logger.info('skipBacks: proceeding to front-only pairing');
+    return true;
   }
 
   /**

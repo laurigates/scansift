@@ -33,6 +33,14 @@ export type ScanProgressCallback = (
 ) => void;
 
 /**
+ * Callback fired with the scan job URL the moment it becomes available.
+ *
+ * Exposed so callers (orchestrator) can register the URL for cancellation
+ * via `cancelScanJob()` without having to wait for `performScan` to resolve.
+ */
+export type ScanJobCallback = (jobUrl: string) => void;
+
+/**
  * Default scan settings
  */
 const DEFAULT_SCAN_SETTINGS = {
@@ -252,6 +260,7 @@ export const performScan = async (
   options: ScanOptions,
   timeoutMs: number = 120000,
   onProgress?: ScanProgressCallback,
+  onJobCreated?: ScanJobCallback,
 ): Promise<Buffer> => {
   // Step 1: Create scan job
   onProgress?.('initiating', 0);
@@ -262,6 +271,7 @@ export const performScan = async (
     throw new ScannerError(`Failed to create scan job: ${jobResult.error ?? 'Unknown error'}`);
   }
 
+  onJobCreated?.(jobResult.jobUrl);
   onProgress?.('initiating', 100);
 
   // Step 2: Wait for scan to complete

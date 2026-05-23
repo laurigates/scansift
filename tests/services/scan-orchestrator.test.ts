@@ -47,14 +47,24 @@ let detectPhotosImpl: (
 ) => Promise<{ photos: DetectedPhoto[]; processingTime: number; warnings?: string[] }>;
 let enhancePhotoImpl: (buffer: Buffer, options: unknown) => Promise<{ buffer: Buffer }>;
 
+// Mutable jobUrl that performScan reports to onJobCreated. Tests that
+// exercise cancelScan reach in via setMockJobUrl() to register a known URL.
+let mockJobUrl: string | null = null;
+const cancelScanJobImpl = mock(async (_jobUrl: string) => undefined);
+
 mock.module('../../src/server/services/scanner', () => ({
   discoverScanners: (timeoutMs?: number) => discoverScannersImpl(timeoutMs),
-  performScan: (
+  performScan: async (
     scanner: DiscoveredScannerLike,
     options: unknown,
     timeoutMs: number,
     progressCallback?: (stage: 'initiating' | 'scanning' | 'downloading', progress: number) => void,
-  ) => performScanImpl(scanner, options, timeoutMs, progressCallback),
+    onJobCreated?: (jobUrl: string) => void,
+  ) => {
+    if (mockJobUrl) onJobCreated?.(mockJobUrl);
+    return performScanImpl(scanner, options, timeoutMs, progressCallback);
+  },
+  cancelScanJob: (jobUrl: string) => cancelScanJobImpl(jobUrl),
 }));
 
 mock.module('../../src/server/detection/photo-detector', () => ({
@@ -140,6 +150,8 @@ beforeEach(() => {
     processingTime: 5,
   });
   enhancePhotoImpl = async () => ({ buffer: mockEnhancedBuffer });
+  mockJobUrl = null;
+  cancelScanJobImpl.mockClear();
 });
 
 describe('ScanOrchestrator', () => {
@@ -669,6 +681,98 @@ describe('ScanOrchestrator', () => {
       expect(result.timestamp).toBeInstanceOf(Date);
       expect(result.rawImagePath).toContain(join(tmp, 'raw'));
       expect(result.rawImagePath).toContain('-front.jpg');
+      await cleanup();
+    });
+  });
+
+  describe('cancelScan', () => {
+    test('returns false when no scan matches the scanId', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const cancelled = await orchestrator.cancelScan('not-a-real-scan-id');
+      expect(cancelled).toBe(false);
+      expect(cancelScanJobImpl).not.toHaveBeenCalled();
+      await cleanup();
+    });
+
+    test('cancels an in-flight scan and dispatches eSCL DELETE against the job URL', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+
+      // Mid-scan, cancel via the active-scans registry. Bridge performScan
+      // with a deferred that resolves only when cancel kicks in.
+      let resolveScan: (buf: Buffer) => void = () => undefined;
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve) => {
+          resolveScan = resolve;
+        });
+
+      const scanPromise = orchestrator.startFrontScan().catch(() => undefined);
+      // Allow performScan + onJobCreated to register the scanId
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      expect(state.status).toBe('scanning_fronts');
+      const scanId = 'scanId' in state ? state.scanId : '';
+      expect(scanId).toBeTruthy();
+
+      const cancelled = await orchestrator.cancelScan(scanId);
+      expect(cancelled).toBe(true);
+      expect(cancelScanJobImpl).toHaveBeenCalledWith(mockJobUrl);
+      expect(orchestrator.getState().status).toBe('idle');
+      expect(events.errors.find((e) => e.error.message === 'Scan cancelled by user')).toBeDefined();
+
+      // Release the still-pending performScan so its catch doesn't leak
+      resolveScan(realImageBuffer);
+      await scanPromise;
+      await cleanup();
+    });
+  });
+
+  describe('skipBacks', () => {
+    test('returns false when state is not ready_for_backs or scanning_backs', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      expect(await orchestrator.skipBacks()).toBe(false);
+      expect(cancelScanJobImpl).not.toHaveBeenCalled();
+      await cleanup();
+    });
+
+    test('cancels an in-flight back scan when called during scanning_backs', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/back-job-7';
+
+      // Drive to ready_for_backs first via a normal front scan
+      await orchestrator.startFrontScan();
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+
+      // Now begin a back scan that hangs so skipBacks can interrupt it
+      let resolveScan: (buf: Buffer) => void = () => undefined;
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve) => {
+          resolveScan = resolve;
+        });
+
+      const backPromise = orchestrator.startBackScan().catch(() => undefined);
+      await new Promise((r) => setTimeout(r, 5));
+      expect(orchestrator.getState().status).toBe('scanning_backs');
+
+      const skipped = await orchestrator.skipBacks();
+      expect(skipped).toBe(true);
+      expect(cancelScanJobImpl).toHaveBeenCalledWith(mockJobUrl);
+
+      // Let the hung performScan resolve so the catch path cleans up
+      resolveScan(realImageBuffer);
+      await backPromise;
+      await cleanup();
+    });
+
+    test('returns true when called from ready_for_backs without an in-flight scan', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+
+      const skipped = await orchestrator.skipBacks();
+      expect(skipped).toBe(true);
+      expect(cancelScanJobImpl).not.toHaveBeenCalled();
       await cleanup();
     });
   });
