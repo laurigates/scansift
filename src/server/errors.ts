@@ -45,6 +45,13 @@ export class StorageError extends AppError {
   }
 }
 
+export class OcrError extends AppError {
+  constructor(message: string) {
+    super(message, 'OCR_ERROR', true);
+    this.name = 'OcrError';
+  }
+}
+
 /**
  * User-friendly error messages.
  * Maps error codes to actionable messages.
@@ -57,6 +64,8 @@ export const USER_ERROR_MESSAGES: Record<string, string> = {
   PROCESSING_ERROR:
     'An error occurred while processing the photo. The original scan has been saved.',
   STORAGE_ERROR: 'Not enough disk space to save photos. Free up space and try again.',
+  OCR_ERROR:
+    'Text extraction failed for this photo. The photo will be saved without date metadata.',
 };
 
 /**

@@ -55,3 +55,6 @@ docs/blueprint/work-orders/
 
 # Ad-hoc agent probe scripts
 tmp_probe*.ts
+
+# Tesseract.js language data (downloaded on first OCR run, ~10MB)
+*.traineddata

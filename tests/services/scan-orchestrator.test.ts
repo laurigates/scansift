@@ -68,6 +68,12 @@ mock.module('../../src/server/processing/enhancer', () => ({
   PRESET_VINTAGE: { normalize: true },
 }));
 
+// OCR is stubbed to a no-op so unit tests don't spawn a real Tesseract worker
+// (Tesseract cannot process the synthetic Buffers used here and would raise).
+mock.module('../../src/server/processing/ocr', () => ({
+  extractMetadata: async (_image: Buffer) => ({ confidence: 0, words: [] }),
+}));
+
 // Import AFTER mock.module calls so the orchestrator picks up the mocked modules
 const { ScanOrchestrator, createScanOrchestrator } = await import(
   '../../src/server/services/scan-orchestrator'

@@ -23,6 +23,7 @@ import type {
   BatchResult,
   DetectedPhoto,
   GridPosition,
+  PhotoMetadata,
   PhotoPair,
   ScanOptions,
   ScanResult,
@@ -32,6 +33,7 @@ import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
 import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
+import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
 // Import existing modules
 import {
   type DiscoveredScanner,
@@ -49,6 +51,7 @@ export interface OrchestratorDependencies {
   performScan?: typeof defaultEsclPerformScan;
   detectPhotos?: typeof defaultDetectPhotos;
   enhancePhoto?: typeof defaultEnhancePhoto;
+  extractMetadata?: typeof defaultExtractMetadata;
 }
 
 /**
@@ -93,6 +96,7 @@ export class ScanOrchestrator extends EventEmitter {
   private esclPerformScan: typeof defaultEsclPerformScan;
   private detectPhotos: typeof defaultDetectPhotos;
   private enhancePhoto: typeof defaultEnhancePhoto;
+  private extractMetadata: typeof defaultExtractMetadata;
 
   constructor(options?: {
     scanTimeout?: number;
@@ -106,6 +110,7 @@ export class ScanOrchestrator extends EventEmitter {
     this.esclPerformScan = options?.deps?.performScan ?? defaultEsclPerformScan;
     this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
+    this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
   }
 
   /**
@@ -341,6 +346,26 @@ export class ScanOrchestrator extends EventEmitter {
         this.backScanResult?.detectedPhotos ?? [],
       );
 
+      // Enrich pairs with OCR metadata (run in parallel across all photo sides)
+      await Promise.all(
+        pairs.flatMap((pair) => {
+          const tasks = [
+            this.enrichWithOcr(pair.front.image).then((meta) => {
+              pair.front.metadata = meta;
+            }),
+          ];
+          if (pair.back) {
+            const back = pair.back;
+            tasks.push(
+              this.enrichWithOcr(back.image).then((meta) => {
+                back.metadata = meta;
+              }),
+            );
+          }
+          return tasks;
+        }),
+      );
+
       // Create output directory
       const batchDir = join(this.outputDirectory, batchId);
       await mkdir(batchDir, { recursive: true });
@@ -545,6 +570,19 @@ export class ScanOrchestrator extends EventEmitter {
     }
 
     return processed;
+  }
+
+  /**
+   * Run OCR on a single image buffer and attach metadata.
+   * Errors are caught and logged — a failed OCR never aborts the batch.
+   */
+  private async enrichWithOcr(image: Buffer): Promise<PhotoMetadata> {
+    try {
+      return await this.extractMetadata(image);
+    } catch (error) {
+      logger.warn({ err: error }, 'OCR enrichment failed for photo; continuing without metadata');
+      return { confidence: 0, words: [] };
+    }
   }
 
   /**

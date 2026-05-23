@@ -18,7 +18,7 @@ import type { AddressInfo } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { io as ioClient, type Socket } from 'socket.io-client';
-import type { DetectedPhoto, GridPosition } from '../../src/shared/types';
+import type { DetectedPhoto, GridPosition, PhotoMetadata } from '../../src/shared/types';
 import { type FakeScanner, startFakeScanner } from './fake-escl-server';
 
 // --- Test fixtures and module mocks --------------------------------------
@@ -80,6 +80,14 @@ mock.module('../../src/server/detection/photo-detector', () => ({
     processingTime: 1,
     warnings: [],
   }),
+}));
+
+// Stub OCR so tests run without spawning a real Tesseract WASM worker.
+// A mutable reference lets individual tests inject specific metadata.
+let ocrMetadataStub: PhotoMetadata = { confidence: 0.9, words: [] };
+
+mock.module('../../src/server/processing/ocr', () => ({
+  extractMetadata: async (_image: Buffer): Promise<PhotoMetadata> => ocrMetadataStub,
 }));
 
 // Import AFTER mock.module so the orchestrator picks up the stubs.
@@ -262,6 +270,34 @@ describe('full scan flow integration', () => {
     const resetBody = (await resetRes.json()) as { state: { status: string } };
     expect(resetBody.state.status).toBe('idle');
   }, 15000);
+
+  test('OCR enrichment: extractedDate from stub propagates through completeBatch without error', async () => {
+    // Inject a stub result that includes an extractedDate so we can verify the
+    // OCR step runs and does not abort the batch.
+    const knownDate = new Date('1985-07-20T00:00:00.000Z');
+    ocrMetadataStub = {
+      confidence: 0.95,
+      extractedText: 'Summer 1985',
+      extractedDate: knownDate,
+      words: [
+        { text: 'Summer', confidence: 0.95 },
+        { text: '1985', confidence: 0.97 },
+      ],
+    };
+
+    const frontRes = await post('/api/scan/front');
+    expect(frontRes.status).toBe(200);
+
+    const completeRes = await post('/api/scan/complete');
+    expect(completeRes.status).toBe(200);
+
+    const batch = (await completeRes.json()) as { pairsSaved: number; totalPhotos: number };
+    // Batch saved successfully — OCR enrichment did not abort saving.
+    expect(batch.pairsSaved).toBe(4);
+
+    // Restore the default stub for subsequent tests.
+    ocrMetadataStub = { confidence: 0.9, words: [] };
+  }, 12000);
 
   test('duplicate POST /api/scan/front while one is in flight returns 409 on the second call', async () => {
     // Slow the fake scanner down so the first scan is still in flight when
