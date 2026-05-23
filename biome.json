@@ -63,7 +63,8 @@
       "!**/*.min.js",
       "!**/*.min.css",
       "!**/bun.lockb",
-      "!**/tmp"
+      "!**/tmp",
+      "!**/src/server/db/migrations"
     ]
   }
 }

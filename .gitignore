@@ -39,6 +39,8 @@ tmp/
 
 # SQLite database
 *.db
+*.db-shm
+*.db-wal
 *.sqlite
 *.sqlite3
 
@@ -53,4 +55,3 @@ docs/blueprint/work-orders/
 
 # Ad-hoc agent probe scripts
 tmp_probe*.ts
-

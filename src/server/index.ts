@@ -13,6 +13,7 @@ import fastifyStatic from '@fastify/static';
 import { SERVER, TIMEOUTS } from '@shared/constants';
 import Fastify from 'fastify';
 import fastifySocketIO from 'fastify-socket.io';
+import { createDb } from './db';
 import { logger } from './logger';
 import { registerRoutes } from './routes';
 import { createScanOrchestrator } from './services/scan-orchestrator';
@@ -45,6 +46,10 @@ export const createApp = async () => {
     scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
   });
   app.decorate('scanOrchestrator', orchestrator);
+
+  // Create SQLite database and attach to app
+  const db = createDb(process.env.DB_PATH ?? './scansift.db');
+  app.decorate('db', db);
 
   // Initialize Socket.IO handler with orchestrator
   app.ready((err) => {
