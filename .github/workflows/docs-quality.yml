@@ -1,0 +1,131 @@
+name: Docs Quality
+
+on:
+  pull_request:
+    paths:
+      - '**/*.md'
+      - 'src/**'
+      - 'package.json'
+      - '.github/workflows/docs-quality.yml'
+      - '.markdownlint.json'
+      - '.lycheeignore'
+  push:
+    branches: [main]
+    paths:
+      - '**/*.md'
+      - '.github/workflows/docs-quality.yml'
+      - '.markdownlint.json'
+      - '.lycheeignore'
+
+concurrency:
+  group: docs-quality-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  id-token: write
+
+jobs:
+  markdown-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: DavidAnson/markdownlint-cli2-action@v18
+        with:
+          globs: |
+            **/*.md
+            !node_modules
+            !coverage
+            !dist
+            !CHANGELOG.md
+
+  link-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Link check
+        uses: lycheeverse/lychee-action@v2
+        with:
+          args: >-
+            --no-progress
+            --cache
+            --max-cache-age 7d
+            README.md CLAUDE.md docs/**/*.md
+          fail: true
+
+  docs-freshness:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed docs/source files
+        id: changed
+        run: |
+          FILES=$(git diff --name-only "origin/${{ github.base_ref }}...HEAD" -- '**/*.md' 'src/**' 'package.json' 2>/dev/null | head -n 50 || true)
+          COUNT=$(printf '%s\n' "$FILES" | grep -c '.' || true)
+          echo "count=$COUNT" >> "$GITHUB_OUTPUT"
+          {
+            echo "files<<EOF"
+            printf '%s\n' "$FILES"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check OAuth token presence
+        id: oauth
+        env:
+          OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+        run: |
+          if [ -n "$OAUTH_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Skip if no relevant changes
+        if: steps.changed.outputs.count == '0'
+        run: echo "No doc or source changes to analyze."
+
+      - name: Warn if OAuth token missing
+        if: steps.changed.outputs.count != '0' && steps.oauth.outputs.present != 'true'
+        run: |
+          echo "::warning::docs-freshness analysis skipped: CLAUDE_CODE_OAUTH_TOKEN secret is not set on this repo."
+          echo "::warning::Set it via: gh secret set CLAUDE_CODE_OAUTH_TOKEN -R ${{ github.repository }}"
+
+      - name: Claude docs-freshness review
+        if: steps.changed.outputs.count != '0' && steps.oauth.outputs.present == 'true'
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--model haiku --max-turns 5'
+          prompt: |
+            Review the changed files in this PR for documentation freshness.
+            Identify cases where `README.md`, `CLAUDE.md`, or files under
+            `docs/` are out of sync with the actual code or project config.
+
+            ## Changed files
+            ${{ steps.changed.outputs.files }}
+
+            ## Focus areas
+            - **Common Commands** sections in README/CLAUDE.md vs scripts in `package.json`
+            - **Tech Stack** sections vs actual dependencies in `package.json`
+            - **File paths** referenced in docs vs the real `src/` layout
+            - **Architecture** descriptions vs current module structure
+            - **Known Limitations** vs features that are now implemented
+            - **Code examples** vs current API shape (function signatures, types)
+            - **PRD/ADR status** under `docs/` if the related feature has shipped
+
+            ## Output
+
+            Leave a PR comment with findings grouped as:
+
+            - **Stale** — doc disagrees with code now (cite file:line for both)
+            - **Possibly stale** — doc may no longer be accurate
+            - **Missing** — feature added in this PR without doc update
+
+            For each finding cite `doc_file:line` and `code_file:line` so the
+            author can jump straight to both. If nothing is stale, leave a
+            single line: `Docs are in sync with code changes in this PR.`
