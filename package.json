@@ -1,6 +1,6 @@
 {
   "name": "scansift",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Network-enabled batch photo scanning application for digitizing physical photo collections",
   "type": "module",
   "private": true,
