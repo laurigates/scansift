@@ -10,12 +10,21 @@ jobs:
   build:
     if: startsWith(github.head_ref, 'release-please--branches--main')
     uses: laurigates/.github/.github/workflows/reusable-container-build.yml@main
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
     with:
       image-name: laurigates/scansift
 
   release:
     if: github.event_name == 'push'
     uses: laurigates/.github/.github/workflows/reusable-container-release.yml@main
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      actions: read
     with:
       image-name: laurigates/scansift
       tag-prefix: v

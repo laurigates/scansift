@@ -7,3 +7,5 @@ on:
 jobs:
   conventional-commits:
     uses: laurigates/.github/.github/workflows/reusable-enforce-conventional-commits.yml@main
+    permissions:
+      pull-requests: write
