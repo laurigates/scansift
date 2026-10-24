@@ -115,10 +115,15 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          claude_args: '--model haiku --max-turns 5 --allowedTools "Bash(gh pr comment:*)"'
+          # 5 turns ran out on PR #73 (error_max_turns, 4 permission denials)
+          # before any comment was posted.
+          claude_args: '--model haiku --max-turns 10 --allowedTools "Bash(gh pr diff:*),Bash(gh pr view:*),Bash(gh pr comment:*)"'
           prompt: |
             REPO: ${{ github.repository }}
             PR NUMBER: ${{ github.event.pull_request.number }}
+
+            The PR branch is already checked out. Use `gh pr diff` to see the
+            changes and the Read tool for files.
 
             Review the changed files in this PR for documentation freshness.
             Identify cases where `README.md`, `CLAUDE.md`, or files under
