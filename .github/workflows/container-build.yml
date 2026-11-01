@@ -17,6 +17,31 @@ jobs:
     with:
       image-name: laurigates/scansift
 
+  # In-repo gate whose check name this file owns. `build` above is a reusable
+  # caller: GitHub reports it as `build / build` on release-please PRs and as a
+  # skipped `build` on every other PR, so neither name works as a required
+  # check. This job reports `container-gate` on every PR. It passes when the
+  # image built or was not needed, and fails when the build failed.
+  #
+  # `if: always()` is required: with a bare `needs:` this job would be skipped
+  # when `build` fails, and a skipped required check counts as passing.
+  container-gate:
+    needs: build
+    if: always() && github.event_name == 'pull_request'
+    permissions: {}
+    runs-on: ubuntu-slim
+    timeout-minutes: 5
+    steps:
+      - name: Container build passed or was not needed
+        env:
+          RESULT: ${{ needs.build.result }}
+        run: |
+          case "$RESULT" in
+            success) echo "Release image built." ;;
+            skipped) echo "Not a release-please PR; the image is built only on release PRs." ;;
+            *) echo "::error::container build concluded '$RESULT'"; exit 1 ;;
+          esac
+
   release:
     if: github.event_name == 'push'
     uses: laurigates/.github/.github/workflows/reusable-container-release.yml@main
