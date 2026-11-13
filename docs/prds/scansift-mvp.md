@@ -189,8 +189,8 @@ Any stage -> ERROR -> retry or skip
 | Event | Payload | Notes |
 |-------|---------|-------|
 | `scan:start` | `{ scanType: 'front' \| 'back' }` | Triggers `startFrontScan()` / `startBackScan()` |
-| `scan:cancel` | `{ scanId }` | ⚠️ Stub — handler logs a warning; no cancellation logic implemented |
-| `scan:skip-backs` | `{ frontScanId }` | ⚠️ Emitted by client (`scan-store.ts`) but no server-side handler; treated as no-op |
+| `scan:cancel` | `{ scanId }` | Calls `cancelScan(scanId)`: eSCL DELETE on the job, state back to `idle`, one `scan:error` ("Scan cancelled by user"). ⚠️ No client code emits it yet |
+| `scan:skip-backs` | `{ frontScanId }` | Calls `skipBacks()`, which cancels an in-flight back scan's eSCL job; the payload is ignored |
 
 ## Out of Scope (MVP)
 
@@ -249,11 +249,14 @@ requirements still need implementation work.
 - **PNG archival (FR-5.4) is unimplemented.** Only JPEG output is produced.
   Quality is `95` (mozjpeg), not the `92` originally specified — this PRD has
   been updated to match reality.
-- **`scan:cancel` Socket.IO event is a stub.** The server logs a warning and
-  takes no action; in-flight scans cannot be cancelled.
-- **`scan:skip-backs` has no server handler.** The client emits it, but there
-  is no listener server-side. The user-facing "skip backs" path relies on
-  calling `POST /api/scan/complete` without a back scan, which is supported.
+- **`scan:cancel` has no client caller.** The server handler cancels the eSCL
+  job and returns the orchestrator to `idle`, but the client has no cancel
+  action and holds the placeholder scan id `'pending'`, so the UI cannot
+  cancel a scan.
+- **`scan:skip-backs` does not pair or save.** The server handler cancels an
+  in-flight back scan's eSCL job and nothing else. The user-facing "skip
+  backs" path relies on calling `POST /api/scan/complete` without a back scan,
+  which is supported.
 - **Removed/renamed REST endpoints.** Earlier PRD revisions advertised
   `/api/scan/start`, `/api/scan/pair`, `/api/scan/status/:id`, and `/api/stats`.
   None of these exist in code; the API surface table above lists the actual

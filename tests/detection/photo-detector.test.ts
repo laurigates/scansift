@@ -45,6 +45,7 @@ async function composeScan(
 
 let singlePhotoScan: Buffer;
 let twoPhotoTopRowScan: Buffer;
+let columnScan: Buffer;
 let fourPhotoScan: Buffer;
 let stripScan: Buffer;
 let fourThreeScan: Buffer;
@@ -62,6 +63,11 @@ beforeAll(async () => {
   twoPhotoTopRowScan = await composeScan([
     { x: 200, y: 200, w: PHOTO_W, h: PHOTO_H },
     { x: SCAN_WIDTH - PHOTO_W - 200, y: 200, w: PHOTO_W, h: PHOTO_H },
+  ]);
+
+  columnScan = await composeScan([
+    { x: 200, y: 200, w: PHOTO_W, h: PHOTO_H },
+    { x: 200, y: SCAN_HEIGHT - PHOTO_H - 200, w: PHOTO_W, h: PHOTO_H },
   ]);
 
   fourPhotoScan = await composeScan([
@@ -237,14 +243,129 @@ describe('detectPhotos performance', () => {
   });
 });
 
-describe('detectPhotos grid assignment (TODO: detector under-segments)', () => {
-  test.todo('returns one region centered for a single-photo scan with bounds matching the photo');
+const BOUNDS_TOLERANCE_PX = 15;
 
-  test.todo('returns two regions with positions top-left and top-right for a top-row scan');
+function expectBoundsNear(
+  actual: { x: number; y: number; width: number; height: number } | undefined,
+  expected: { x: number; y: number; width: number; height: number },
+): void {
+  expect(actual).toBeDefined();
+  if (!actual) return;
+  expect(Math.abs(actual.x - expected.x)).toBeLessThanOrEqual(BOUNDS_TOLERANCE_PX);
+  expect(Math.abs(actual.y - expected.y)).toBeLessThanOrEqual(BOUNDS_TOLERANCE_PX);
+  expect(Math.abs(actual.width - expected.width)).toBeLessThanOrEqual(BOUNDS_TOLERANCE_PX);
+  expect(Math.abs(actual.height - expected.height)).toBeLessThanOrEqual(BOUNDS_TOLERANCE_PX);
+}
 
-  test.todo('returns two regions with positions top-left and bottom-left for a column scan');
+describe('detectPhotos grid assignment', () => {
+  const left = 200;
+  const right = SCAN_WIDTH - PHOTO_W - 200;
+  const top = 200;
+  const bottom = SCAN_HEIGHT - PHOTO_H - 200;
 
-  test.todo('returns four regions covering all four grid positions exactly once for a 2x2 scan');
+  test('returns one region centered for a single-photo scan with bounds matching the photo', async () => {
+    const result = await detectPhotos(singlePhotoScan, TEST_DPI);
 
-  test.todo('returns an empty array for a blank white scan with no photos');
+    expect(result.photos).toHaveLength(1);
+    expectBoundsNear(result.photos[0]?.bounds, {
+      x: (SCAN_WIDTH - PHOTO_W) / 2,
+      y: (SCAN_HEIGHT - PHOTO_H) / 2,
+      width: PHOTO_W,
+      height: PHOTO_H,
+    });
+    // A photo centred on both midlines takes the first grid slot.
+    expect(result.photos[0]?.position).toBe('top-left');
+    expect(result.warnings).toEqual([]);
+  });
+
+  test('returns two regions with positions top-left and top-right for a top-row scan', async () => {
+    const result = await detectPhotos(twoPhotoTopRowScan, TEST_DPI);
+
+    expect(result.photos.map((p) => p.position)).toEqual(['top-left', 'top-right']);
+    expectBoundsNear(result.photos[0]?.bounds, {
+      x: left,
+      y: top,
+      width: PHOTO_W,
+      height: PHOTO_H,
+    });
+    expectBoundsNear(result.photos[1]?.bounds, {
+      x: right,
+      y: top,
+      width: PHOTO_W,
+      height: PHOTO_H,
+    });
+  });
+
+  test('returns two regions with positions top-left and bottom-left for a column scan', async () => {
+    const result = await detectPhotos(columnScan, TEST_DPI);
+
+    expect(result.photos.map((p) => p.position)).toEqual(['top-left', 'bottom-left']);
+    expectBoundsNear(result.photos[0]?.bounds, {
+      x: left,
+      y: top,
+      width: PHOTO_W,
+      height: PHOTO_H,
+    });
+    expectBoundsNear(result.photos[1]?.bounds, {
+      x: left,
+      y: bottom,
+      width: PHOTO_W,
+      height: PHOTO_H,
+    });
+  });
+
+  test('returns four regions covering all four grid positions exactly once for a 2x2 scan', async () => {
+    const result = await detectPhotos(fourPhotoScan, TEST_DPI);
+
+    expect(result.photos.map((p) => p.position)).toEqual([
+      'top-left',
+      'top-right',
+      'bottom-left',
+      'bottom-right',
+    ]);
+    const expected = [
+      { x: left, y: top },
+      { x: right, y: top },
+      { x: left, y: bottom },
+      { x: right, y: bottom },
+    ];
+    for (const [i, origin] of expected.entries()) {
+      expectBoundsNear(result.photos[i]?.bounds, { ...origin, width: PHOTO_W, height: PHOTO_H });
+    }
+  });
+
+  test('a photo whose centre is a few pixels past both midlines still takes the first slot', async () => {
+    const offCentreScan = await composeScan([
+      {
+        x: (SCAN_WIDTH - PHOTO_W) / 2 + 10,
+        y: (SCAN_HEIGHT - PHOTO_H) / 2 + 10,
+        w: PHOTO_W,
+        h: PHOTO_H,
+      },
+    ]);
+
+    const result = await detectPhotos(offCentreScan, TEST_DPI);
+
+    expect(result.photos.map((p) => p.position)).toEqual(['top-left']);
+  });
+
+  test('assigns distinct positions when two photos fall in the same quadrant', async () => {
+    const stackedScan = await composeScan([
+      { x: 200, y: 100, w: 700, h: 700 },
+      { x: 200, y: 1150, w: 700, h: 700 },
+    ]);
+
+    const result = await detectPhotos(stackedScan, TEST_DPI);
+
+    expect(result.photos.map((p) => p.position)).toEqual(['top-left', 'bottom-left']);
+    expectBoundsNear(result.photos[0]?.bounds, { x: 200, y: 100, width: 700, height: 700 });
+    expectBoundsNear(result.photos[1]?.bounds, { x: 200, y: 1150, width: 700, height: 700 });
+  });
+
+  test('returns an empty array for a blank white scan with no photos', async () => {
+    const result = await detectPhotos(emptyScan, TEST_DPI);
+
+    expect(result.photos).toEqual([]);
+    expect(result.warnings[0]).toMatch(/No photos detected/i);
+  });
 });
