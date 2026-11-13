@@ -44,7 +44,12 @@ let performScanImpl: (
 let detectPhotosImpl: (
   buffer: Buffer,
   dpi: number,
-) => Promise<{ photos: DetectedPhoto[]; processingTime: number; warnings?: string[] }>;
+) => Promise<{
+  photos: DetectedPhoto[];
+  processingTime: number;
+  warnings?: string[];
+  imageDimensions?: { width: number; height: number };
+}>;
 let enhancePhotoImpl: (buffer: Buffer, options: unknown) => Promise<{ buffer: Buffer }>;
 
 // Mutable jobUrl that performScan reports to onJobCreated. Tests that
@@ -624,6 +629,46 @@ describe('ScanOrchestrator', () => {
         'photo-003-bottom-right-front.jpg',
       ]);
       await cleanup();
+    });
+
+    // realImageBuffer is 400x400. The front's centre is (180, 100), top-left;
+    // the back's is (212, 100), top-right: an 8% shift over the midline.
+    const shiftedFront = makeDetectedPhoto('top-left', {
+      bounds: { x: 130, y: 50, width: 100, height: 100 },
+    });
+    const shiftedBack = makeDetectedPhoto('top-right', {
+      bounds: { x: 162, y: 50, width: 100, height: 100 },
+    });
+
+    async function scanShiftedPair(imageDimensions?: { width: number; height: number }) {
+      let detections = 0;
+      detectPhotosImpl = async () => {
+        detections += 1;
+        return {
+          photos: [detections === 1 ? shiftedFront : shiftedBack],
+          processingTime: 1,
+          ...(imageDimensions && { imageDimensions }),
+        };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      const result = await orchestrator.completeBatch();
+      const files = (await readdir(join(tmp, result.batchId))).sort();
+      await cleanup();
+      return files;
+    }
+
+    test('pairs a back that shifted 8% into the neighbouring grid cell', async () => {
+      const files = await scanShiftedPair({ width: 400, height: 400 });
+
+      expect(files).toEqual(['photo-001-top-left-back.jpg', 'photo-001-top-left-front.jpg']);
+    });
+
+    test('pairs by grid position only when the detector reports no dimensions', async () => {
+      const files = await scanShiftedPair();
+
+      expect(files).toEqual(['photo-001-top-left-front.jpg']);
     });
   });
 

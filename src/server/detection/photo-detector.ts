@@ -105,6 +105,7 @@ export async function detectPhotos(imageBuffer: Buffer, dpi: number): Promise<De
       photos,
       processingTime,
       warnings,
+      imageDimensions: { width, height },
     };
   } catch (error) {
     throw new Error(

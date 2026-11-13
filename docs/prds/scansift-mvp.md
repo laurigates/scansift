@@ -45,7 +45,7 @@ fronts by grid position, and OCR-processed to extract date metadata.
 |----|-------|----------|--------|
 | US-1.1 | Scan 4 photos at once on flatbed | P0 | ✅ Implemented |
 | US-1.2 | Trigger scan from mobile phone | P0 | ✅ Implemented |
-| US-1.3 | Scan fronts then backs, auto-pair by position | P0 | ⚠️ Partial — pairs by exact grid position only (see FR-3.2) |
+| US-1.3 | Scan fronts then backs, auto-pair by position | P0 | ✅ Implemented — position tolerance reaches real scans once the detector segments per photo (see FR-3.2) |
 | US-1.4 | Real-time progress feedback with thumbnails | P0 | ✅ Implemented |
 | US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — auto-crop works, deskew not implemented (see FR-5.2) |
 | US-2.2 | Automatic contrast / white-balance enhancement | P1 | ✅ Implemented |
@@ -93,7 +93,7 @@ Any stage -> ERROR -> retry or skip
 | ID | Requirement | Status |
 |----|-------------|--------|
 | FR-3.1 | Match fronts to backs by grid position | ✅ Implemented |
-| FR-3.2 | Tolerate position deviation up to 10% | ❌ Not implemented — exact grid-position match only |
+| FR-3.2 | Tolerate position deviation up to 10% | ✅ Implemented — photo centre may shift up to 10% of the scan width and height |
 | FR-3.3 | Gracefully handle missing backs (save front-only) | ✅ Implemented |
 
 ### FR-4: Web Interface
@@ -237,10 +237,12 @@ requirements still need implementation work.
 - **2% crop margin (FR-5.1) is unimplemented.** `cropPhoto` in
   `src/server/processing/cropper.ts`, which the orchestrator calls for every
   detected photo, extracts the raw detected bounds with no inset/outset margin.
-- **Position-deviation tolerance (FR-3.2) is unimplemented.** `pairPhotos`
-  (`src/server/processing/pairing.ts`), which the orchestrator calls in
-  `completeBatch`, matches by *exact* `GridPosition` string. The "up to 10%"
-  tolerance from the PRD does not exist.
+- **Position-deviation tolerance (FR-3.2) has no effect on real scans yet.**
+  `pairPhotos` (`src/server/processing/pairing.ts`) pairs a back whose centre
+  is within 10% of the scan width and height of a front's. The detector
+  currently returns one region covering the whole scan (issue #58), so front
+  and back always have the same centre and the tolerance is only exercised by
+  tests with mocked detections.
 - **`originals/` path drift (FR-5.5).** Raw scans are saved to
   `{outputDirectory}/raw/{scanId}-{front|back}.jpg`, not `originals/`. The
   intent (preserve unprocessed scan) is met; only the directory name differs.
