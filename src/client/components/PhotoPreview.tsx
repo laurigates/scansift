@@ -1,18 +1,21 @@
 import type { GridPosition } from '@shared/types';
 import { useState } from 'react';
 
+interface Photo {
+  position: GridPosition;
+  thumbnail: string; // base64
+  bounds: { width: number; height: number };
+  confidence: number;
+}
+
 interface PhotoPreviewProps {
-  photos: Array<{
-    position: GridPosition;
-    thumbnail: string; // base64
-    bounds: { width: number; height: number };
-    confidence: number;
-  }>;
+  /** Grid slots from the scan store; null marks a position with no detected photo. */
+  photos: Array<Photo | null>;
   onViewFull?: (position: GridPosition) => void;
 }
 
 interface PhotoCardProps {
-  photo: PhotoPreviewProps['photos'][0] | null;
+  photo: Photo | null;
   position: GridPosition;
   onViewFull?: (position: GridPosition) => void;
 }
@@ -202,7 +205,9 @@ const PhotoCard = ({ photo, position, onViewFull }: PhotoCardProps) => {
   );
 };
 
-export const PhotoPreview = ({ photos, onViewFull }: PhotoPreviewProps) => {
+export const PhotoPreview = ({ photos: slots, onViewFull }: PhotoPreviewProps) => {
+  const photos = slots.filter((photo): photo is Photo => photo !== null);
+
   // Create a map of position to photo for easy lookup
   const photoMap = new Map(photos.map((p) => [p.position, p]));
 

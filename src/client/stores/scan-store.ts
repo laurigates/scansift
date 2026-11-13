@@ -9,10 +9,28 @@ interface PhotoPreview {
   confidence: number;
 }
 
+/** Slot order of `previews`: one entry per grid position, null when no photo was detected there. */
+const GRID_POSITIONS: readonly GridPosition[] = [
+  'top-left',
+  'top-right',
+  'bottom-left',
+  'bottom-right',
+];
+
+type PreviewSlots = Array<PhotoPreview | null>;
+
+const toPreviewSlots = (photos: readonly PhotoPreview[]): PreviewSlots => {
+  const byPosition = new Map(photos.map((photo) => [photo.position, photo]));
+  return GRID_POSITIONS.map((position) => byPosition.get(position) ?? null);
+};
+
 interface ScanStore {
   state: ScanState;
   socket: Socket | null;
-  previews: PhotoPreview[];
+  /** Always 4 slots, ordered as GRID_POSITIONS. */
+  previews: PreviewSlots;
+  /** Last scanner availability pushed by the server; null until the first scanner:status event. */
+  scannerAvailable: boolean | null;
   connect: () => void;
   disconnect: () => void;
   startScan: (type: 'front' | 'back') => Promise<void>;
@@ -25,7 +43,8 @@ interface ScanStore {
 export const useScanStore = create<ScanStore>((set, get) => ({
   state: { status: 'idle' },
   socket: null,
-  previews: [],
+  previews: toPreviewSlots([]),
+  scannerAvailable: null,
 
   connect: () => {
     const existingSocket = get().socket;
@@ -44,6 +63,27 @@ export const useScanStore = create<ScanStore>((set, get) => ({
 
     socket.on('disconnect', () => {
       console.log('Disconnected from server');
+    });
+
+    // socket.io-client reports exhausted reconnection attempts on the Manager,
+    // not on the socket. No further reconnect is attempted after this.
+    socket.io.on('reconnect_failed', () => {
+      set({
+        state: {
+          status: 'error',
+          message: 'Lost connection to server',
+          recoverable: false,
+        },
+      });
+    });
+
+    // The server sends its workflow state on connect and on every transition.
+    socket.on('state:changed', (state: ScanState) => {
+      set({ state });
+    });
+
+    socket.on('scanner:status', (data: ServerEvent & { type: 'scanner:status' }) => {
+      set({ scannerAvailable: data.available });
     });
 
     socket.on('scan:progress', (data: ServerEvent & { type: 'scan:progress' }) => {
@@ -94,19 +134,9 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       });
     });
 
-    socket.on(
-      'photos:detected',
-      (data: {
-        photos: Array<{
-          position: GridPosition;
-          thumbnail: string;
-          bounds: { width: number; height: number };
-          confidence: number;
-        }>;
-      }) => {
-        set({ previews: data.photos });
-      },
-    );
+    socket.on('photos:detected', (data: { scanId: string; previews: PhotoPreview[] }) => {
+      set({ previews: toPreviewSlots(data.previews) });
+    });
 
     set({ socket });
   },
@@ -133,31 +163,30 @@ export const useScanStore = create<ScanStore>((set, get) => ({
       return;
     }
 
-    // Emit scan:start with appropriate context
-    const payload =
-      type === 'back' && state.status === 'ready_for_backs'
-        ? { scanType: type, frontScanId: state.frontScanId }
-        : { scanType: type };
-
-    socket.emit('scan:start', payload);
-
-    // Update local state
     if (type === 'front') {
+      socket.emit('scan:start', { scanType: type });
       set({
         state: {
           status: 'scanning_fronts',
           scanId: 'pending',
         },
       });
-    } else if (state.status === 'ready_for_backs') {
-      set({
-        state: {
-          status: 'scanning_backs',
-          frontScanId: state.frontScanId,
-          backScanId: 'pending',
-        },
-      });
+      return;
     }
+
+    // A back scan needs a completed front scan to pair with.
+    if (state.status !== 'ready_for_backs') {
+      return;
+    }
+
+    socket.emit('scan:start', { scanType: type, frontScanId: state.frontScanId });
+    set({
+      state: {
+        status: 'scanning_backs',
+        frontScanId: state.frontScanId,
+        backScanId: 'pending',
+      },
+    });
   },
 
   skipBacks: async () => {
@@ -204,10 +233,10 @@ export const useScanStore = create<ScanStore>((set, get) => ({
   },
 
   clearPreviews: () => {
-    set({ previews: [] });
+    set({ previews: toPreviewSlots([]) });
   },
 
   reset: () => {
-    set({ state: { status: 'idle' }, previews: [] });
+    set({ state: { status: 'idle' }, previews: toPreviewSlots([]) });
   },
 }));
