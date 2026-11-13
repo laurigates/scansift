@@ -113,7 +113,7 @@ Any stage -> ERROR -> retry or skip
 | FR-5.1 | Crop to detected bounds with 2% margin (Sharp) | ⚠️ Partial — crops to detected bounds; 2% margin not applied |
 | FR-5.2 | Deskew rotation correction | ❌ Not implemented — manual rotation supported in `enhancer.ts`, no auto-deskew |
 | FR-5.3 | Auto white-balance and contrast normalization | ✅ Implemented |
-| FR-5.4 | Save as JPEG (quality 95%) with optional PNG archival | ⚠️ Partial — JPEG only; no PNG archival path |
+| FR-5.4 | Save as JPEG (quality 95%) with optional PNG archival | ✅ Implemented — PNG archival is opt-in (`ARCHIVE_PNG=true`), written as `.png` beside each `.jpg` |
 | FR-5.5 | Preserve original unprocessed scan in `originals/` | ⚠️ Partial — preserved under `raw/` (path drift), not `originals/` |
 
 ### FR-6: OCR and Metadata
@@ -240,9 +240,13 @@ requirements still need implementation work.
 - **`originals/` path drift (FR-5.5).** Raw scans are saved to
   `{outputDirectory}/raw/{scanId}-{front|back}.jpg`, not `originals/`. The
   intent (preserve unprocessed scan) is met; only the directory name differs.
-- **PNG archival (FR-5.4) is unimplemented.** Only JPEG output is produced.
-  Quality is `95` (mozjpeg), not the `92` originally specified — this PRD has
-  been updated to match reality.
+- **PNG archival (FR-5.4) is opt-in and lossless from the enhancement stage
+  only.** With `ARCHIVE_PNG=true` each photo also gets a `.png` under the same
+  base name, encoded from the enhanced image before JPEG compression. The
+  scanner source is still fetched as JPEG, so the PNG does not undo the
+  scanner's compression. The PNG carries no EXIF date and is not listed in the
+  sidecar. JPEG quality is `95` (mozjpeg), not the `92` originally specified —
+  this PRD has been updated to match reality.
 - **`scan:cancel` Socket.IO event is a stub.** The server logs a warning and
   takes no action; in-flight scans cannot be cancelled.
 - **`scan:skip-backs` has no server handler.** The client emits it, but there

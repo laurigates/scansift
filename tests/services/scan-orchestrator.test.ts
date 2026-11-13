@@ -47,7 +47,10 @@ let detectPhotosImpl: (
   buffer: Buffer,
   dpi: number,
 ) => Promise<{ photos: DetectedPhoto[]; processingTime: number; warnings?: string[] }>;
-let enhancePhotoImpl: (buffer: Buffer, options: unknown) => Promise<{ buffer: Buffer }>;
+let enhancePhotoImpl: (
+  buffer: Buffer,
+  options: unknown,
+) => Promise<{ buffer: Buffer; archivalBuffer?: Buffer }>;
 
 // Mutable jobUrl that performScan reports to onJobCreated. Tests that
 // exercise cancelScan reach in via setMockJobUrl() to register a known URL.
@@ -153,7 +156,11 @@ function attachListeners(orchestrator: InstanceType<typeof ScanOrchestrator>) {
   return events;
 }
 
-async function makeOrchestrator(opts?: { scanTimeout?: number; deps?: OrchestratorDependencies }) {
+async function makeOrchestrator(opts?: {
+  scanTimeout?: number;
+  archivalPng?: boolean;
+  deps?: OrchestratorDependencies;
+}) {
   const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
   const orchestrator = new ScanOrchestrator({ outputDirectory: tmp, ...opts });
   return { orchestrator, tmp, cleanup: () => rm(tmp, { recursive: true, force: true }) };
@@ -886,6 +893,111 @@ describe('ScanOrchestrator', () => {
 
       const fronts = (await listProcessed(tmp)).filter((f) => f.endsWith('_front.jpg'));
       expect(fronts).toEqual([1, 2, 3, 4].map((n) => join('unknown', `unknown_00${n}_front.jpg`)));
+      await cleanup();
+    });
+  });
+
+  describe('PNG archival copy', () => {
+    const pngOf = (label: string) => Buffer.from(`archival-png-${label}`);
+
+    /**
+     * Enhancer stub that honours the archivalPng option the way the real
+     * enhancer does, and records the options of every call. Each call gets
+     * its own PNG so a mixed-up front/back is visible.
+     */
+    const enhanceWithArchival = () => {
+      const seenOptions: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        seenOptions.push(options);
+        const wantsPng = (options as { archivalPng?: boolean }).archivalPng === true;
+        return {
+          buffer: mockEnhancedBuffer,
+          ...(wantsPng && { archivalBuffer: pngOf(String(seenOptions.length)) }),
+        };
+      };
+      return seenOptions;
+    };
+
+    test('writes one PNG beside each JPEG when the option is on', async () => {
+      const seenOptions = enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual(
+        [
+          'unknown_001.json',
+          'unknown_001_back.jpg',
+          'unknown_001_back.png',
+          'unknown_001_front.jpg',
+          'unknown_001_front.png',
+          'unknown_002.json',
+          'unknown_002_back.jpg',
+          'unknown_002_back.png',
+          'unknown_002_front.jpg',
+          'unknown_002_front.png',
+        ].map((name) => join('unknown', name)),
+      );
+      expect(seenOptions).toHaveLength(4);
+      for (const options of seenOptions) {
+        expect(options).toMatchObject({ normalize: true, sharpen: true, archivalPng: true });
+      }
+
+      // Calls 1-2 are the fronts (top-left, top-right), 3-4 the backs.
+      const read = (name: string) => readFile(join(tmp, 'processed', 'unknown', name));
+      expect((await read('unknown_001_front.png')).equals(pngOf('1'))).toBe(true);
+      expect((await read('unknown_002_front.png')).equals(pngOf('2'))).toBe(true);
+      expect((await read('unknown_001_back.png')).equals(pngOf('3'))).toBe(true);
+      expect((await read('unknown_002_back.png')).equals(pngOf('4'))).toBe(true);
+      expect((await read('unknown_001_front.jpg')).equals(mockEnhancedBuffer)).toBe(true);
+      await cleanup();
+    });
+
+    test('writes no back PNG for a front-only pair', async () => {
+      enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const pngs = (await listProcessed(tmp)).filter((f) => f.endsWith('.png'));
+      expect(pngs).toEqual(
+        ['unknown_001_front.png', 'unknown_002_front.png'].map((name) => join('unknown', name)),
+      );
+      await cleanup();
+    });
+
+    test('writes no PNG and does not ask the enhancer for one by default', async () => {
+      const seenOptions = enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      const files = await listProcessed(tmp);
+      expect(files.filter((f) => f.endsWith('.png'))).toEqual([]);
+      expect(files.filter((f) => f.endsWith('.jpg'))).toHaveLength(4);
+      expect(seenOptions).toHaveLength(4);
+      for (const options of seenOptions) {
+        expect(options).not.toHaveProperty('archivalPng');
+      }
+      await cleanup();
+    });
+
+    test('the next batch continues the sequence past files that have a PNG', async () => {
+      enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const pngs = (await listProcessed(tmp)).filter((f) => f.endsWith('.png'));
+      expect(pngs).toEqual([1, 2, 3, 4].map((n) => join('unknown', `unknown_00${n}_front.png`)));
       await cleanup();
     });
   });

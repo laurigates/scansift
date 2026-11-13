@@ -29,6 +29,10 @@ export interface OutputPaths {
   directory: string;
   frontPath: string;
   backPath: string;
+  /** PNG archival copy of the front; written only when archival is on. */
+  frontArchivalPath: string;
+  /** PNG archival copy of the back; written only when archival is on. */
+  backArchivalPath: string;
   sidecarPath: string;
 }
 
@@ -108,6 +112,8 @@ export const buildOutputPaths = (
     directory,
     frontPath: join(directory, `${base}_front.jpg`),
     backPath: join(directory, `${base}_back.jpg`),
+    frontArchivalPath: join(directory, `${base}_front.png`),
+    backArchivalPath: join(directory, `${base}_back.png`),
     sidecarPath: join(directory, `${base}.json`),
   };
 };

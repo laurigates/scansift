@@ -60,6 +60,8 @@ export interface DetectedPhoto {
     height: number;
   };
   confidence: number;
+  /** Lossless PNG of the enhanced image; present only when archival is on. */
+  archivalImage?: Buffer;
 }
 
 // Photo metadata extracted from OCR
@@ -116,6 +118,8 @@ export interface EnhancementOptions {
   gamma?: number;
   rotation?: number; // Degrees to rotate (positive = clockwise)
   whiteBalance?: boolean;
+  /** Also return a lossless PNG of the enhanced image (EnhancementResult.archivalBuffer). */
+  archivalPng?: boolean;
 }
 
 // Applied enhancement details for tracking
@@ -128,6 +132,11 @@ export interface AppliedEnhancement {
 // Result of image enhancement processing
 export interface EnhancementResult {
   buffer: Buffer;
+  /**
+   * Lossless PNG encoded from the same pipeline output as `buffer`, before
+   * JPEG compression. Present only when `archivalPng` was requested.
+   */
+  archivalBuffer?: Buffer;
   appliedEnhancements: AppliedEnhancement[];
   processingTime: number; // milliseconds
   inputFormat?: string;
@@ -174,6 +183,8 @@ export interface CroppedPhoto {
   };
   enhanced?: boolean;
   metadata?: PhotoMetadata;
+  /** Lossless PNG of the enhanced image; present only when archival is on. */
+  archivalImage?: Buffer;
 }
 
 // Paired photo (front with optional back)

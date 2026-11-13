@@ -288,3 +288,63 @@ describe('Performance and efficiency', () => {
     expect(duration).toBeLessThan(3000); // Should complete within 3 seconds
   });
 });
+
+describe('PNG archival copy', () => {
+  // Gaussian noise: JPEG cannot reproduce it exactly, so a PNG made from the
+  // JPEG would not match the source pixels.
+  let noisyPngBuffer: Buffer;
+
+  const rawPixels = (image: Buffer) => sharp(image).raw().toBuffer();
+
+  beforeAll(async () => {
+    noisyPngBuffer = await sharp({
+      create: {
+        width: 64,
+        height: 48,
+        channels: 3,
+        background: { r: 0, g: 0, b: 0 },
+        noise: { type: 'gaussian', mean: 128, sigma: 40 },
+      },
+    })
+      .png()
+      .toBuffer();
+  });
+
+  test('returns no archival buffer unless asked', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, PRESET_STANDARD);
+
+    expect(result.archivalBuffer).toBeUndefined();
+  });
+
+  test('returns a PNG with the dimensions of the JPEG when archivalPng is set', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, { ...PRESET_STANDARD, archivalPng: true });
+
+    expect(result.archivalBuffer).toBeInstanceOf(Buffer);
+    const png = await sharp(result.archivalBuffer).metadata();
+    const jpeg = await sharp(result.buffer).metadata();
+    expect(png.format).toBe('png');
+    expect(jpeg.format).toBe('jpeg');
+    expect(png.width).toBe(jpeg.width);
+    expect(png.height).toBe(jpeg.height);
+    expect(result.outputFormat).toBe('jpeg');
+  });
+
+  test('the PNG holds the pipeline output exactly, not a decode of the JPEG', async () => {
+    // No enhancement steps, so the pipeline output is the input pixels.
+    const result = await enhancePhoto(noisyPngBuffer, { archivalPng: true });
+    const archival = result.archivalBuffer;
+    if (!archival) throw new Error('expected an archival buffer');
+
+    const source = await rawPixels(noisyPngBuffer);
+    expect((await rawPixels(archival)).equals(source)).toBe(true);
+    expect((await rawPixels(result.buffer)).equals(source)).toBe(false);
+  });
+
+  test('the PNG includes the enhancement steps', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, { rotation: 90, archivalPng: true });
+
+    const png = await sharp(result.archivalBuffer).metadata();
+    expect(png.width).toBe(48);
+    expect(png.height).toBe(64);
+  });
+});
