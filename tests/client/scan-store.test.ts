@@ -18,10 +18,19 @@ interface FakeSocket {
   fire: (event: string, ...args: unknown[]) => void;
   listenerCount: (event: string) => number;
   listeners: Map<string, Listener[]>;
+  // Stand-in for the socket.io Manager, which is where `reconnect_failed` fires.
+  io: {
+    on: (event: string, fn: Listener) => void;
+    fire: (event: string, ...args: unknown[]) => void;
+    listenerCount: (event: string) => number;
+  };
 }
+
+const EMPTY_PREVIEWS = [null, null, null, null];
 
 const makeFakeSocket = (): FakeSocket => {
   const listeners = new Map<string, Listener[]>();
+  const managerListeners = new Map<string, Listener[]>();
   const fake: FakeSocket = {
     on(event, fn) {
       const arr = listeners.get(event) ?? [];
@@ -43,6 +52,19 @@ const makeFakeSocket = (): FakeSocket => {
       return listeners.get(event)?.length ?? 0;
     },
     listeners,
+    io: {
+      on(event, fn) {
+        const arr = managerListeners.get(event) ?? [];
+        arr.push(fn);
+        managerListeners.set(event, arr);
+      },
+      fire(event, ...args) {
+        for (const fn of managerListeners.get(event) ?? []) fn(...args);
+      },
+      listenerCount(event) {
+        return managerListeners.get(event)?.length ?? 0;
+      },
+    },
   };
   return fake;
 };
@@ -69,7 +91,12 @@ beforeEach(() => {
   lastIoOptions = undefined;
   // Zustand stores are module singletons; reset only the data fields so the
   // action functions on the store remain intact (replace=true would wipe them).
-  useScanStore.setState({ state: { status: 'idle' }, socket: null, previews: [] });
+  useScanStore.setState({
+    state: { status: 'idle' },
+    socket: null,
+    previews: [...EMPTY_PREVIEWS],
+    scannerAvailable: null,
+  });
 });
 
 afterEach(() => {
@@ -104,6 +131,9 @@ describe('useScanStore', () => {
       expect(currentSocket.listenerCount('scan:complete')).toBe(1);
       expect(currentSocket.listenerCount('scan:error')).toBe(1);
       expect(currentSocket.listenerCount('photos:detected')).toBe(1);
+      expect(currentSocket.listenerCount('state:changed')).toBe(1);
+      expect(currentSocket.listenerCount('scanner:status')).toBe(1);
+      expect(currentSocket.io.listenerCount('reconnect_failed')).toBe(1);
     });
 
     test('does not create a new socket when already connected', () => {
@@ -119,13 +149,98 @@ describe('useScanStore', () => {
       expect(replacement.listenerCount('scan:progress')).toBe(0);
     });
 
-    // The work order asks for listeners for `state:changed`, `scanner:status`,
-    // and `batch:complete`. The current store does not register any of these,
-    // so the corresponding behavior is not testable. Marking as todo so the
-    // gap is visible without modifying source code.
-    test.todo('registers listener for state:changed (not implemented in store)', () => {});
-    test.todo('registers listener for scanner:status (not implemented in store)', () => {});
-    test.todo('registers listener for batch:complete (not implemented in store)', () => {});
+    // Rejected spec item: the work order asked for a `batch:complete` listener.
+    // The server never sends that event to clients. The orchestrator's
+    // batch:complete is rebroadcast as `scan:complete` (setupOrchestratorListeners
+    // in src/server/websocket/socket-handler.ts) and ServerToClientEvents has no
+    // `batch:complete` member, so a listener for it could never fire.
+    test('does not register a batch:complete listener (the server sends scan:complete)', () => {
+      useScanStore.getState().connect();
+
+      expect(currentSocket.listenerCount('batch:complete')).toBe(0);
+    });
+  });
+
+  describe('event: state:changed', () => {
+    test('adopts the server state', () => {
+      useScanStore.getState().connect();
+
+      currentSocket.fire('state:changed', {
+        status: 'processing_fronts',
+        scanId: 'scan-1',
+        progress: 10,
+      });
+
+      expect(useScanStore.getState().state).toEqual({
+        status: 'processing_fronts',
+        scanId: 'scan-1',
+        progress: 10,
+      });
+    });
+
+    test('replaces a local optimistic state with the server state', async () => {
+      useScanStore.getState().connect();
+      await useScanStore.getState().startScan('front');
+      expect(useScanStore.getState().state.status).toBe('scanning_fronts');
+
+      currentSocket.fire('state:changed', { status: 'scanning_fronts', scanId: 'scan-9' });
+
+      expect(useScanStore.getState().state).toEqual({
+        status: 'scanning_fronts',
+        scanId: 'scan-9',
+      });
+    });
+
+    test('lets scan:progress apply once the server reports processing_fronts', async () => {
+      useScanStore.getState().connect();
+      await useScanStore.getState().startScan('front');
+
+      currentSocket.fire('state:changed', {
+        status: 'processing_fronts',
+        scanId: 'scan-1',
+        progress: 0,
+      });
+      currentSocket.fire('scan:progress', {
+        type: 'scan:progress',
+        scanId: 'scan-1',
+        progress: 60,
+      });
+
+      expect(useScanStore.getState().state).toEqual({
+        status: 'processing_fronts',
+        scanId: 'scan-1',
+        progress: 60,
+      });
+    });
+  });
+
+  describe('event: scanner:status', () => {
+    // getInitialState() rather than getState(): beforeEach overwrites the
+    // data fields, which would hide a wrong initial value.
+    test('scannerAvailable is null before any status event', () => {
+      expect(useScanStore.getInitialState().scannerAvailable).toBeNull();
+    });
+
+    test('records scanner availability', () => {
+      useScanStore.getState().connect();
+
+      currentSocket.fire('scanner:status', { type: 'scanner:status', available: true });
+      expect(useScanStore.getState().scannerAvailable).toBe(true);
+
+      currentSocket.fire('scanner:status', { type: 'scanner:status', available: false });
+      expect(useScanStore.getState().scannerAvailable).toBe(false);
+    });
+
+    test('does not change the workflow state', () => {
+      useScanStore.getState().connect();
+      useScanStore.setState({
+        state: { status: 'ready_for_backs', frontScanId: 'front-1', photosDetected: 2 },
+      });
+
+      currentSocket.fire('scanner:status', { type: 'scanner:status', available: false });
+
+      expect(useScanStore.getState().state.status).toBe('ready_for_backs');
+    });
   });
 
   describe('disconnect', () => {
@@ -157,9 +272,30 @@ describe('useScanStore', () => {
       expect(lastIoOptions?.reconnectionDelay).toBe(1000);
     });
 
-    // The work order describes a custom retry loop and a terminal error after
-    // exhaustion. The store does not implement either; track as todo.
-    test.todo('enters error state after reconnection attempts are exhausted', () => {});
+    // socket.io-client emits `reconnect_failed` on the Manager (`socket.io`),
+    // not on the socket, once reconnectionAttempts is used up.
+    test('enters a non-recoverable error state after reconnection attempts are exhausted', () => {
+      useScanStore.getState().connect();
+      useScanStore.setState({
+        state: { status: 'processing_fronts', scanId: 'scan-1', progress: 50 },
+      });
+
+      currentSocket.io.fire('reconnect_failed');
+
+      expect(useScanStore.getState().state).toEqual({
+        status: 'error',
+        message: 'Lost connection to server',
+        recoverable: false,
+      });
+    });
+
+    test('a plain disconnect does not enter the error state', () => {
+      useScanStore.getState().connect();
+
+      currentSocket.fire('disconnect');
+
+      expect(useScanStore.getState().state.status).toBe('idle');
+    });
   });
 
   describe('event: scan:progress', () => {
@@ -315,54 +451,72 @@ describe('useScanStore', () => {
   });
 
   describe('event: photos:detected', () => {
-    test('replaces previews with the incoming photos array', () => {
-      useScanStore.getState().connect();
+    const topLeft = {
+      position: 'top-left' as const,
+      thumbnail: 'AAAA',
+      bounds: { x: 0, y: 0, width: 100, height: 100 },
+      confidence: 0.95,
+    };
+    const bottomRight = {
+      position: 'bottom-right' as const,
+      thumbnail: 'BBBB',
+      bounds: { x: 200, y: 300, width: 120, height: 80 },
+      confidence: 0.8,
+    };
 
-      const photos = [
-        {
-          position: 'top-left' as const,
-          thumbnail: 'data:image/jpeg;base64,AAAA',
-          bounds: { width: 100, height: 100 },
-          confidence: 0.95,
-        },
-        {
-          position: 'bottom-right' as const,
-          thumbnail: 'data:image/jpeg;base64,BBBB',
-          bounds: { width: 120, height: 80 },
-          confidence: 0.8,
-        },
-      ];
-
-      currentSocket.fire('photos:detected', { photos });
-
-      const previews = useScanStore.getState().previews;
-      expect(previews).toHaveLength(2);
-      expect(previews[0]?.position).toBe('top-left');
-      expect(previews[1]?.position).toBe('bottom-right');
+    test('starts with four empty slots', () => {
+      expect(useScanStore.getInitialState().previews).toEqual(EMPTY_PREVIEWS);
     });
 
-    test('handles an empty photos array', () => {
+    // Slot order: top-left, top-right, bottom-left, bottom-right.
+    test('populates a 4-slot grid-indexed preview array with nulls for missing slots', () => {
       useScanStore.getState().connect();
-      useScanStore.setState({
-        previews: [
-          {
-            position: 'top-left',
-            thumbnail: 'old',
-            bounds: { width: 1, height: 1 },
-            confidence: 1,
-          },
-        ],
+
+      // Payload shape as the server sends it: { scanId, previews }, in
+      // detection order rather than grid order.
+      currentSocket.fire('photos:detected', {
+        scanId: 'scan-1',
+        previews: [bottomRight, topLeft],
       });
 
-      currentSocket.fire('photos:detected', { photos: [] });
-
-      expect(useScanStore.getState().previews).toEqual([]);
+      expect(useScanStore.getState().previews).toEqual([topLeft, null, null, bottomRight]);
     });
 
-    // The work order asks for a 4-slot preview array indexed by grid position
-    // with missing slots null. The store currently stores the raw array as-is
-    // (not slotted), so this is intentionally a todo to flag the gap.
-    test.todo('populates a 4-slot grid-indexed preview array with nulls for missing slots', () => {});
+    test('fills all four slots in grid order', () => {
+      useScanStore.getState().connect();
+      const topRight = { ...topLeft, position: 'top-right' as const, thumbnail: 'CCCC' };
+      const bottomLeft = { ...topLeft, position: 'bottom-left' as const, thumbnail: 'DDDD' };
+
+      currentSocket.fire('photos:detected', {
+        scanId: 'scan-1',
+        previews: [bottomLeft, bottomRight, topRight, topLeft],
+      });
+
+      expect(useScanStore.getState().previews).toEqual([
+        topLeft,
+        topRight,
+        bottomLeft,
+        bottomRight,
+      ]);
+    });
+
+    test('an empty previews array yields four empty slots', () => {
+      useScanStore.getState().connect();
+      useScanStore.setState({ previews: [topLeft, null, null, null] });
+
+      currentSocket.fire('photos:detected', { scanId: 'scan-1', previews: [] });
+
+      expect(useScanStore.getState().previews).toEqual(EMPTY_PREVIEWS);
+    });
+
+    test('replaces the previous slots instead of merging into them', () => {
+      useScanStore.getState().connect();
+      useScanStore.setState({ previews: [topLeft, null, null, null] });
+
+      currentSocket.fire('photos:detected', { scanId: 'scan-2', previews: [bottomRight] });
+
+      expect(useScanStore.getState().previews).toEqual([null, null, null, bottomRight]);
+    });
   });
 
   describe('action: startScan(front)', () => {
@@ -427,20 +581,13 @@ describe('useScanStore', () => {
       }
     });
 
-    // Note on actual store behavior: when startScan('back') is invoked outside
-    // ready_for_backs, the store still emits scan:start (with no frontScanId)
-    // and does NOT update state. The work order expects a no-op or throw, so
-    // strict validation here would fail. We document the gap as todo and
-    // assert the actual non-throwing behavior in a separate test below.
-    test.todo('startScan("back") outside ready_for_backs is a no-op or throws', () => {});
-
-    test('startScan("back") outside ready_for_backs does not throw and does not update state', async () => {
+    test('startScan("back") outside ready_for_backs is a no-op', async () => {
       useScanStore.getState().connect();
       // state remains idle.
 
       await expect(useScanStore.getState().startScan('back')).resolves.toBeUndefined();
 
-      // State did not transition into a scanning state.
+      expect(currentSocket.emit).not.toHaveBeenCalled();
       expect(useScanStore.getState().state.status).toBe('idle');
     });
   });
@@ -529,7 +676,7 @@ describe('useScanStore', () => {
   });
 
   describe('action: clearPreviews', () => {
-    test('empties the previews array', () => {
+    test('empties every preview slot', () => {
       useScanStore.setState({
         previews: [
           {
@@ -538,12 +685,15 @@ describe('useScanStore', () => {
             bounds: { width: 1, height: 1 },
             confidence: 1,
           },
+          null,
+          null,
+          null,
         ],
       });
 
       useScanStore.getState().clearPreviews();
 
-      expect(useScanStore.getState().previews).toEqual([]);
+      expect(useScanStore.getState().previews).toEqual(EMPTY_PREVIEWS);
     });
   });
 
@@ -552,19 +702,22 @@ describe('useScanStore', () => {
       useScanStore.setState({
         state: { status: 'error', message: 'x', recoverable: true },
         previews: [
+          null,
           {
             position: 'top-right',
             thumbnail: 'y',
             bounds: { width: 1, height: 1 },
             confidence: 1,
           },
+          null,
+          null,
         ],
       });
 
       useScanStore.getState().reset();
 
       expect(useScanStore.getState().state).toEqual({ status: 'idle' });
-      expect(useScanStore.getState().previews).toEqual([]);
+      expect(useScanStore.getState().previews).toEqual(EMPTY_PREVIEWS);
     });
 
     test('reset does not disconnect the existing socket', () => {
