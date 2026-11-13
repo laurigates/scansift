@@ -45,16 +45,18 @@ export const createApp = async () => {
     prefix: '/',
   });
 
-  // Create scan orchestrator instance and attach to app
-  const orchestrator = createScanOrchestrator({
-    outputDirectory: process.env.OUTPUT_DIR ?? './scanned-photos',
-    scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
-  });
-  app.decorate('scanOrchestrator', orchestrator);
-
   // Create SQLite database and attach to app
   const db = createDb(process.env.DB_PATH ?? './scansift.db');
   app.decorate('db', db);
+
+  // Create scan orchestrator instance and attach to app. It shares the
+  // app.db handle so completed batches are what /api/stats reads back.
+  const orchestrator = createScanOrchestrator({
+    outputDirectory: process.env.OUTPUT_DIR ?? './scanned-photos',
+    scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
+    deps: { db },
+  });
+  app.decorate('scanOrchestrator', orchestrator);
 
   // Initialize Socket.IO handler with orchestrator
   app.ready((err) => {

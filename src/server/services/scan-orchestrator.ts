@@ -29,6 +29,7 @@ import type {
   ScanResult,
   ScanState,
 } from '@/shared/types';
+import { batches, type Db, pairs, photos } from '../db';
 import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector';
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
@@ -54,6 +55,19 @@ export interface OrchestratorDependencies {
   enhancePhoto?: typeof defaultEnhancePhoto;
   extractMetadata?: typeof defaultExtractMetadata;
   cancelScanJob?: typeof defaultCancelScanJob;
+  /**
+   * Database handle for persisting batches, photos and pairs. When omitted,
+   * nothing is persisted (no database file is opened on the caller's behalf).
+   */
+  db?: Db;
+}
+
+/**
+ * File paths written by savePair for one photo pair.
+ */
+interface SavedPairPaths {
+  frontPath: string;
+  backPath?: string;
 }
 
 /**
@@ -100,6 +114,9 @@ export class ScanOrchestrator extends EventEmitter {
   private enhancePhoto: typeof defaultEnhancePhoto;
   private extractMetadata: typeof defaultExtractMetadata;
   private cancelScanJob: typeof defaultCancelScanJob;
+  private db: Db | undefined;
+  /** When the current batch's front scan was requested; null between batches. */
+  private batchStartedAt: Date | null = null;
 
   /**
    * Registry of in-flight scan jobs, keyed by scanId.
@@ -125,6 +142,7 @@ export class ScanOrchestrator extends EventEmitter {
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
     this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
     this.cancelScanJob = options?.deps?.cancelScanJob ?? defaultCancelScanJob;
+    this.db = options?.deps?.db;
   }
 
   /**
@@ -170,6 +188,7 @@ export class ScanOrchestrator extends EventEmitter {
 
     const scanId = randomUUID();
     const mergedOptions = { ...DEFAULT_SCAN_OPTIONS, ...options };
+    this.batchStartedAt = new Date();
 
     try {
       // Update state to scanning
@@ -355,14 +374,14 @@ export class ScanOrchestrator extends EventEmitter {
       this.updateState({ status: 'saving', batchId });
 
       // Pair photos
-      const pairs = this.pairPhotos(
+      const photoPairs = this.pairPhotos(
         this._frontScanResult.detectedPhotos,
         this.backScanResult?.detectedPhotos ?? [],
       );
 
       // Enrich pairs with OCR metadata (run in parallel across all photo sides)
       await Promise.all(
-        pairs.flatMap((pair) => {
+        photoPairs.flatMap((pair) => {
           const tasks = [
             this.enrichWithOcr(pair.front.image).then((meta) => {
               pair.front.metadata = meta;
@@ -386,10 +405,13 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Save pairs
       let savedCount = 0;
-      for (const pair of pairs) {
-        await this.savePair(pair, batchDir, savedCount);
+      const savedPaths: SavedPairPaths[] = [];
+      for (const pair of photoPairs) {
+        savedPaths.push(await this.savePair(pair, batchDir, savedCount));
         savedCount++;
       }
+
+      this.persistBatch(batchId, batchDir, photoPairs, savedPaths);
 
       // Create result
       const result: BatchResult = {
@@ -426,6 +448,7 @@ export class ScanOrchestrator extends EventEmitter {
   reset(): void {
     this._frontScanResult = null;
     this.backScanResult = null;
+    this.batchStartedAt = null;
     this.updateState({ status: 'idle' });
   }
 
@@ -720,9 +743,97 @@ export class ScanOrchestrator extends EventEmitter {
   }
 
   /**
+   * Write the batch, one photos row per pair and one pairs row per pair in a
+   * single transaction. A photos row models one physical photo (front plus
+   * optional back), so pairs.back_photo_id stays null.
+   *
+   * Errors are caught and logged — the files are already on disk, so a failed
+   * database write never aborts the batch.
+   */
+  private persistBatch(
+    batchId: string,
+    batchDir: string,
+    photoPairs: PhotoPair[],
+    savedPaths: SavedPairPaths[],
+  ): void {
+    const db = this.db;
+    const front = this._frontScanResult;
+    if (!db || !front) {
+      return;
+    }
+
+    try {
+      const back = this.backScanResult;
+      const scanDate = front.timestamp.toISOString();
+      const detectionConfidence = new Map(
+        front.detectedPhotos.map((photo) => [photo.position, photo.confidence]),
+      );
+
+      db.transaction((tx) => {
+        tx.insert(batches)
+          .values({
+            id: batchId,
+            startedAt: (this.batchStartedAt ?? front.timestamp).toISOString(),
+            completedAt: new Date().toISOString(),
+            status: 'complete',
+            outputDirectory: batchDir,
+          })
+          .run();
+
+        photoPairs.forEach((pair, index) => {
+          const paths = savedPaths[index];
+          if (!paths) {
+            throw new Error(`No saved paths for pair ${index}`);
+          }
+          // Text is normally written on the back, so back OCR wins over front.
+          const backMeta = pair.back?.metadata;
+          const frontMeta = pair.front.metadata;
+          const textMeta = backMeta?.extractedText
+            ? backMeta
+            : frontMeta?.extractedText
+              ? frontMeta
+              : undefined;
+          const photoDate = backMeta?.extractedDate ?? frontMeta?.extractedDate;
+
+          const photoRow = tx
+            .insert(photos)
+            .values({
+              batchId,
+              frontFilePath: paths.frontPath,
+              backFilePath: paths.backPath ?? null,
+              originalFrontPath: front.rawImagePath,
+              originalBackPath: pair.back && back ? back.rawImagePath : null,
+              scanDate,
+              photoDate: photoDate?.toISOString() ?? null,
+              extractedText: textMeta?.extractedText ?? null,
+              gridPosition: pair.position,
+              // OCR confidence of the side the text came from; without OCR
+              // text, the front's detection confidence.
+              confidenceScore:
+                textMeta?.confidence ?? detectionConfidence.get(pair.position) ?? null,
+            })
+            .returning({ id: photos.id })
+            .get();
+
+          tx.insert(pairs).values({ batchId, frontPhotoId: photoRow.id, backPhotoId: null }).run();
+        });
+      });
+    } catch (error) {
+      logger.error(
+        { batchId, err: error },
+        'Failed to persist batch to database; photos remain on disk',
+      );
+    }
+  }
+
+  /**
    * Save photo pair to filesystem
    */
-  private async savePair(pair: PhotoPair, outputDir: string, index: number): Promise<void> {
+  private async savePair(
+    pair: PhotoPair,
+    outputDir: string,
+    index: number,
+  ): Promise<SavedPairPaths> {
     try {
       // Generate filename with index and position
       const baseFilename = `photo-${String(index + 1).padStart(3, '0')}-${pair.position}`;
@@ -732,12 +843,15 @@ export class ScanOrchestrator extends EventEmitter {
       await writeFile(frontPath, pair.front.image);
 
       // Save back if available
+      const saved: SavedPairPaths = { frontPath };
       if (pair.back) {
         const backPath = join(outputDir, `${baseFilename}-back.jpg`);
         await writeFile(backPath, pair.back.image);
+        saved.backPath = backPath;
       }
 
       logger.debug({ index: index + 1, outputDir }, 'Saved photo pair');
+      return saved;
     } catch (error) {
       throw new StorageError(
         `Failed to save photo pair: ${error instanceof Error ? error.message : String(error)}`,
