@@ -577,16 +577,19 @@ export class ScanOrchestrator extends EventEmitter {
 
     logger.info({ scanId, jobUrl: active.jobUrl }, 'Cancelling scan');
 
+    // Mark the scanId before awaiting the DELETE. The in-flight performScan
+    // call settles at some point (a document, a scanner error or a timeout),
+    // possibly while the DELETE is still pending; the mark makes
+    // startFrontScan/startBackScan stop there without touching the state or
+    // emitting again.
+    this.cancelledScans.add(scanId);
+
     // Best-effort cancel — cancelScanJob never throws (see escl-client.ts)
     await this.cancelScanJob(active.jobUrl);
 
     this.activeScans.delete(scanId);
 
-    // Move back to idle so the UI can start fresh. The in-flight performScan
-    // call settles later (a document, a scanner error or a timeout); marking
-    // the scanId here makes startFrontScan/startBackScan stop at that point
-    // without touching the state or emitting again.
-    this.cancelledScans.add(scanId);
+    // Move back to idle so the UI can start fresh.
     this.updateState({ status: 'idle' });
     this.emit('scan:error', scanId, new Error(SCAN_CANCELLED_MESSAGE));
 
