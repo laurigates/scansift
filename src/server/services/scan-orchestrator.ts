@@ -17,12 +17,11 @@ import { EventEmitter } from 'node:events';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PROGRESS_WEIGHTS, TIMEOUTS } from '@shared/constants';
-import sharp from 'sharp';
 // Import types
 import type {
   BatchResult,
+  CroppedPhoto,
   DetectedPhoto,
-  GridPosition,
   PhotoMetadata,
   PhotoPair,
   ScanOptions,
@@ -32,8 +31,10 @@ import type {
 import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector';
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
+import { cropPhoto as defaultCropPhoto } from '../processing/cropper';
 import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
+import { pairPhotos } from '../processing/pairing';
 // Import existing modules
 import {
   type DiscoveredScanner,
@@ -51,6 +52,7 @@ export interface OrchestratorDependencies {
   discoverScanners?: typeof defaultDiscoverScanners;
   performScan?: typeof defaultEsclPerformScan;
   detectPhotos?: typeof defaultDetectPhotos;
+  cropPhoto?: typeof defaultCropPhoto;
   enhancePhoto?: typeof defaultEnhancePhoto;
   extractMetadata?: typeof defaultExtractMetadata;
   cancelScanJob?: typeof defaultCancelScanJob;
@@ -83,6 +85,16 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
 const DEFAULT_OUTPUT_DIR = './scanned-photos';
 
 /**
+ * Present a processed DetectedPhoto in the shape pairPhotos takes.
+ */
+const toCroppedPhoto = (photo: DetectedPhoto): CroppedPhoto => ({
+  image: photo.image,
+  position: photo.position,
+  bounds: photo.bounds,
+  originalBounds: photo.bounds,
+});
+
+/**
  * Scan Orchestrator Service
  *
  * Manages the complete scanning workflow with state tracking and event emission.
@@ -97,6 +109,7 @@ export class ScanOrchestrator extends EventEmitter {
   private discoverScanners: typeof defaultDiscoverScanners;
   private esclPerformScan: typeof defaultEsclPerformScan;
   private detectPhotos: typeof defaultDetectPhotos;
+  private cropPhoto: typeof defaultCropPhoto;
   private enhancePhoto: typeof defaultEnhancePhoto;
   private extractMetadata: typeof defaultExtractMetadata;
   private cancelScanJob: typeof defaultCancelScanJob;
@@ -122,6 +135,7 @@ export class ScanOrchestrator extends EventEmitter {
     this.discoverScanners = options?.deps?.discoverScanners ?? defaultDiscoverScanners;
     this.esclPerformScan = options?.deps?.performScan ?? defaultEsclPerformScan;
     this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
+    this.cropPhoto = options?.deps?.cropPhoto ?? defaultCropPhoto;
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
     this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
     this.cancelScanJob = options?.deps?.cancelScanJob ?? defaultCancelScanJob;
@@ -354,10 +368,11 @@ export class ScanOrchestrator extends EventEmitter {
       // Update state to saving
       this.updateState({ status: 'saving', batchId });
 
-      // Pair photos
-      const pairs = this.pairPhotos(
-        this._frontScanResult.detectedPhotos,
-        this.backScanResult?.detectedPhotos ?? [],
+      // Pair photos. pairPhotos logs its own warnings (duplicate positions,
+      // count mismatch, backs without a front).
+      const { pairs } = pairPhotos(
+        this._frontScanResult.detectedPhotos.map(toCroppedPhoto),
+        (this.backScanResult?.detectedPhotos ?? []).map(toCroppedPhoto),
       );
 
       // Enrich pairs with OCR metadata (run in parallel across all photo sides)
@@ -638,15 +653,10 @@ export class ScanOrchestrator extends EventEmitter {
 
     for (const photo of detectedPhotos) {
       try {
-        // Extract region from raw image
-        const cropped = await sharp(rawImage)
-          .extract({
-            left: photo.bounds.x,
-            top: photo.bounds.y,
-            width: photo.bounds.width,
-            height: photo.bounds.height,
-          })
-          .toBuffer();
+        // Extract region from raw image. cropPhoto clamps a region that
+        // overruns the scan and throws on one it cannot use; cropAllPhotos is
+        // not used because it drops such photos silently.
+        const cropped = await this.cropPhoto(rawImage, photo.bounds);
 
         // Enhance cropped photo
         const enhanced = await this.enhancePhoto(cropped, PRESET_STANDARD);
@@ -676,47 +686,6 @@ export class ScanOrchestrator extends EventEmitter {
       logger.warn({ err: error }, 'OCR enrichment failed for photo; continuing without metadata');
       return { confidence: 0, words: [] };
     }
-  }
-
-  /**
-   * Pair front and back photos by grid position
-   */
-  private pairPhotos(fronts: DetectedPhoto[], backs: DetectedPhoto[]): PhotoPair[] {
-    const pairs: PhotoPair[] = [];
-
-    // Create map of backs by position
-    const backsByPosition = new Map<GridPosition, DetectedPhoto>();
-    for (const back of backs) {
-      backsByPosition.set(back.position, back);
-    }
-
-    // Pair each front with corresponding back
-    for (const front of fronts) {
-      const back = backsByPosition.get(front.position);
-
-      const photoPair: PhotoPair = {
-        front: {
-          image: front.image,
-          position: front.position,
-          bounds: front.bounds,
-          originalBounds: front.bounds,
-        },
-        position: front.position,
-      };
-
-      if (back) {
-        photoPair.back = {
-          image: back.image,
-          position: back.position,
-          bounds: back.bounds,
-          originalBounds: back.bounds,
-        };
-      }
-
-      pairs.push(photoPair);
-    }
-
-    return pairs;
   }
 
   /**

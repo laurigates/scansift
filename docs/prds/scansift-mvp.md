@@ -235,11 +235,11 @@ requirements still need implementation work.
   exposes a manual `rotation` option but no rotation-detection logic. This
   partially undermines US-2.1.
 - **2% crop margin (FR-5.1) is unimplemented.** `cropPhoto` in
-  `src/server/processing/cropper.ts` extracts the raw detected bounds with no
-  inset/outset margin.
-- **Position-deviation tolerance (FR-3.2) is unimplemented.** Both
-  `pairPhotos` (`src/server/processing/pairing.ts`) and the orchestrator's
-  internal pairing match by *exact* `GridPosition` string. The "up to 10%"
+  `src/server/processing/cropper.ts`, which the orchestrator calls for every
+  detected photo, extracts the raw detected bounds with no inset/outset margin.
+- **Position-deviation tolerance (FR-3.2) is unimplemented.** `pairPhotos`
+  (`src/server/processing/pairing.ts`), which the orchestrator calls in
+  `completeBatch`, matches by *exact* `GridPosition` string. The "up to 10%"
   tolerance from the PRD does not exist.
 - **`originals/` path drift (FR-5.5).** Raw scans are saved to
   `{outputDirectory}/raw/{scanId}-{front|back}.jpg`, not `originals/`. The
