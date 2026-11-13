@@ -100,6 +100,20 @@ describe('buildOutputPaths', () => {
     expect(paths.sidecarPath).toBe(join('/out', 'processed', 'unknown', 'unknown_007.json'));
   });
 
+  test('archival PNG paths share the base name of the JPEGs', () => {
+    const dated = buildOutputPaths('/out', june14, 1);
+    expect(dated.frontArchivalPath).toBe(
+      join('/out', 'processed', '1987', '06', '1987-06-14_001_front.png'),
+    );
+    expect(dated.backArchivalPath).toBe(
+      join('/out', 'processed', '1987', '06', '1987-06-14_001_back.png'),
+    );
+    const undated = buildOutputPaths('/out', undefined, 7);
+    expect(undated.frontArchivalPath).toBe(
+      join('/out', 'processed', 'unknown', 'unknown_007_front.png'),
+    );
+  });
+
   test('keeps sequences above 999 unambiguous', () => {
     expect(buildOutputPaths('/out', undefined, 1000).frontPath).toContain('unknown_1000_front.jpg');
   });

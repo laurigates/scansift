@@ -324,6 +324,14 @@ const DEFAULT_OUTPUT_DIR = './scanned-photos';
 const DEFAULT_SCAN_TIMEOUT = 120000; // 2 minutes
 ```
 
+### PNG Archival Copy
+
+Off by default. The constructor option `archivalPng: true` (set by the server
+from the environment variable `ARCHIVE_PNG=true`) writes a lossless PNG beside
+each JPEG under the same base name, e.g. `1987-06-14_001_front.png`. The PNG
+is encoded from the enhanced image before JPEG compression; the scan itself is
+still fetched from the scanner as JPEG. The PNG carries no EXIF date.
+
 ### Enhancement Preset
 
 Uses `PRESET_STANDARD` by default:

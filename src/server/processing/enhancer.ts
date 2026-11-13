@@ -61,6 +61,12 @@ function resolveSharpenParams(
 const JPEG_QUALITY = 95;
 
 /**
+ * Maximum zlib compression for the archival PNG. PNG is lossless at every
+ * level; this only trades encode time for file size.
+ */
+const PNG_COMPRESSION_LEVEL = 9;
+
+/**
  * Pixels trimmed from each side of the inscribed rectangle, so the
  * interpolated edge of the rotated image stays out of the crop.
  */
@@ -268,6 +274,12 @@ export async function enhancePhoto(
     });
   }
 
+  // The archival PNG branches off before JPEG encoding, so it holds the
+  // enhanced pixels without JPEG loss.
+  const archivalPipeline = options.archivalPng
+    ? pipeline.clone().png({ compressionLevel: PNG_COMPRESSION_LEVEL })
+    : undefined;
+
   // Convert to high-quality JPEG for storage
   pipeline = pipeline.jpeg({ quality: JPEG_QUALITY, mozjpeg: true });
 
@@ -279,8 +291,10 @@ export async function enhancePhoto(
 
   // Execute pipeline
   let buffer: Buffer;
+  let archivalBuffer: Buffer | undefined;
   try {
     buffer = await pipeline.toBuffer();
+    archivalBuffer = await archivalPipeline?.toBuffer();
   } catch (error) {
     const errorMessage = error instanceof Error ? error.message : 'Unknown error';
     throw new Error(`Image processing failed: ${errorMessage}`);
@@ -295,6 +309,7 @@ export async function enhancePhoto(
 
   return {
     buffer,
+    ...(archivalBuffer && { archivalBuffer }),
     appliedEnhancements,
     processingTime,
     inputFormat,

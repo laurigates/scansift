@@ -54,6 +54,8 @@ export const createApp = async () => {
   const orchestrator = createScanOrchestrator({
     outputDirectory: process.env.OUTPUT_DIR ?? './scanned-photos',
     scanTimeout: TIMEOUTS.SCAN_TIMEOUT_MS,
+    // Opt-in lossless PNG copy beside each JPEG (FR-5.4).
+    archivalPng: process.env.ARCHIVE_PNG === 'true',
     deps: { db },
   });
   app.decorate('scanOrchestrator', orchestrator);

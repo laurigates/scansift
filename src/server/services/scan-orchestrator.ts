@@ -22,6 +22,7 @@ import type {
   BatchResult,
   CroppedPhoto,
   DetectedPhoto,
+  EnhancementOptions,
   PhotoMetadata,
   PhotoPair,
   ScanOptions,
@@ -77,6 +78,20 @@ export interface OrchestratorDependencies {
 }
 
 /**
+ * Constructor options for ScanOrchestrator.
+ */
+export interface ScanOrchestratorOptions {
+  scanTimeout?: number;
+  outputDirectory?: string;
+  /**
+   * Also write a lossless PNG of each enhanced photo beside its JPEG
+   * (FR-5.4). Off by default: a PNG is several times the size of the JPEG.
+   */
+  archivalPng?: boolean;
+  deps?: OrchestratorDependencies;
+}
+
+/**
  * File paths written by savePair for one photo pair.
  */
 interface SavedPairPaths {
@@ -126,6 +141,7 @@ const toCroppedPhoto = (photo: DetectedPhoto): CroppedPhoto => ({
   position: photo.position,
   bounds: photo.bounds,
   originalBounds: photo.bounds,
+  ...(photo.archivalImage && { archivalImage: photo.archivalImage }),
 });
 
 /**
@@ -149,6 +165,8 @@ export class ScanOrchestrator extends EventEmitter {
   private extractMetadata: typeof defaultExtractMetadata;
   private cancelScanJob: typeof defaultCancelScanJob;
   private db: Db | undefined;
+  /** Options for every enhancePhoto call; asks for a PNG when archival is on. */
+  private enhancementOptions: EnhancementOptions;
   /** When the current batch's front scan was requested; null between batches. */
   private batchStartedAt: Date | null = null;
 
@@ -165,12 +183,11 @@ export class ScanOrchestrator extends EventEmitter {
   // has not unwound yet. Entries are removed when that call's catch runs.
   private cancelledScans = new Set<string>();
 
-  constructor(options?: {
-    scanTimeout?: number;
-    outputDirectory?: string;
-    deps?: OrchestratorDependencies;
-  }) {
+  constructor(options?: ScanOrchestratorOptions) {
     super();
+    this.enhancementOptions = options?.archivalPng
+      ? { ...PRESET_STANDARD, archivalPng: true }
+      : PRESET_STANDARD;
     this.scanTimeout = options?.scanTimeout ?? TIMEOUTS.SCAN_TIMEOUT_MS;
     this.outputDirectory = options?.outputDirectory ?? DEFAULT_OUTPUT_DIR;
     this.discoverScanners = options?.deps?.discoverScanners ?? defaultDiscoverScanners;
@@ -748,14 +765,15 @@ export class ScanOrchestrator extends EventEmitter {
         const enhanced = await this.enhancePhoto(
           cropped,
           Math.abs(skew) >= MIN_DESKEW_DEGREES
-            ? { ...PRESET_STANDARD, rotation: skew }
-            : PRESET_STANDARD,
+            ? { ...this.enhancementOptions, rotation: skew }
+            : this.enhancementOptions,
         );
 
         // Update photo with processed image
         processed.push({
           ...photo,
           image: enhanced.buffer,
+          ...(enhanced.archivalBuffer && { archivalImage: enhanced.archivalBuffer }),
         });
       } catch (error) {
         logger.error({ position: photo.position, err: error }, 'Failed to process photo');
@@ -867,6 +885,8 @@ export class ScanOrchestrator extends EventEmitter {
    * Save a photo pair and its sidecar JSON to the date-based layout:
    * processed/YYYY/MM/YYYY-MM-DD_NNN_{front|back}.jpg, or processed/unknown/
    * when no date was extracted. The extracted date is written to EXIF.
+   * A side that carries an archival PNG gets it written under the same base
+   * name with a .png extension; the PNG gets no EXIF date.
    */
   private async savePair(
     pair: PhotoPair,
@@ -885,12 +905,18 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Save front
       await writeFile(paths.frontPath, await withDate(pair.front.image));
+      if (pair.front.archivalImage) {
+        await writeFile(paths.frontArchivalPath, pair.front.archivalImage);
+      }
 
       // Save back if available
       const saved: SavedPairPaths = { frontPath: paths.frontPath };
       if (pair.back) {
         await writeFile(paths.backPath, await withDate(pair.back.image));
         saved.backPath = paths.backPath;
+        if (pair.back.archivalImage) {
+          await writeFile(paths.backArchivalPath, pair.back.archivalImage);
+        }
       }
 
       const sidecar = buildSidecar(pair, paths, batchId, scanTimestamp);
@@ -909,10 +935,6 @@ export class ScanOrchestrator extends EventEmitter {
 /**
  * Create a new scan orchestrator instance
  */
-export const createScanOrchestrator = (options?: {
-  scanTimeout?: number;
-  outputDirectory?: string;
-  deps?: OrchestratorDependencies;
-}): ScanOrchestrator => {
+export const createScanOrchestrator = (options?: ScanOrchestratorOptions): ScanOrchestrator => {
   return new ScanOrchestrator(options);
 };
