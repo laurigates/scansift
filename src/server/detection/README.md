@@ -6,14 +6,13 @@ This module implements photo detection using Sharp-based Sobel edge detection fo
 
 The detection algorithm uses Sharp's image-processing primitives to identify rectangular photo regions:
 
-1. **Grayscale Conversion**: Convert the scanned image to grayscale for simpler processing
-2. **Sobel X Convolution**: Apply a 3×3 horizontal Sobel kernel via `sharp.convolve()` to surface vertical edges
-3. **Sobel Y Convolution**: Apply a 3×3 vertical Sobel kernel via `sharp.convolve()` to surface horizontal edges
-4. **Magnitude Combination**: Combine the two edge maps into a single magnitude image (sqrt of squared components, centered around 128)
-5. **Projection Profile Analysis**: Sum edge intensities along rows and columns to find horizontal and vertical edge lines bounding each photo
-6. **Region Construction**: Build candidate photo regions from intersecting edge lines, filtered by minimum area (2" × 2" at the scan DPI)
-7. **Position Assignment**: Assign grid positions based on spatial location (top-left, top-right, bottom-left, bottom-right)
-8. **Sorting**: Sort detected photos by position for consistent ordering
+1. **Grayscale Decode**: Decode the scanned image to raw greyscale once
+2. **Sobel Magnitude**: Compute the 3×3 Sobel X and Y responses per pixel and combine them as `|gx| + |gy|` clamped to 255, so both edge polarities count
+3. **Projection Profile Analysis**: Sum edge intensities along rows and columns to find horizontal and vertical edge lines bounding each photo
+4. **Region Construction**: Build candidate photo regions from intersecting edge lines, filtered by minimum size (2" × 2" at the scan DPI)
+5. **Content Filter**: Keep a candidate only when at least half of its sampled pixels differ from the page background (median grey level along the image border) by more than 25 grey levels
+6. **Position Assignment**: Assign each region a distinct grid position (top-left, top-right, bottom-left, bottom-right). The region nearest a quadrant's centre claims it; a region whose quadrant is taken gets the nearest free one. A centre within 1% of the page size of a midline counts as top / left
+7. **Sorting**: Sort detected photos by position for consistent ordering
 
 ## Files
 
@@ -65,7 +64,8 @@ try {
 ### Detection Parameters
 
 - **Sobel Kernels**: 3×3 X kernel `[-1,0,1,-2,0,2,-1,0,1]`, 3×3 Y kernel `[-1,-2,-1,0,0,0,1,2,1]`
-- **Edge Magnitude**: `sqrt(gx² + gy²)` clamped to 0-255, with the convolution output centered around 128
+- **Edge Magnitude**: `|gx| + |gy|` clamped to 0-255, computed on the raw greyscale pixels
+- **Content Filter**: grey-level delta 25 from the border median, minimum content fraction 0.5
 - **Minimum Photo Area**: 2" × 2" at the scan DPI (e.g. 600×600 px at 300 DPI)
 
 ## Testing

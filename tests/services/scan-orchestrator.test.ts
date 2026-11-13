@@ -46,7 +46,12 @@ let performScanImpl: (
 let detectPhotosImpl: (
   buffer: Buffer,
   dpi: number,
-) => Promise<{ photos: DetectedPhoto[]; processingTime: number; warnings?: string[] }>;
+) => Promise<{
+  photos: DetectedPhoto[];
+  processingTime: number;
+  warnings?: string[];
+  imageDimensions?: { width: number; height: number };
+}>;
 let enhancePhotoImpl: (buffer: Buffer, options: unknown) => Promise<{ buffer: Buffer }>;
 
 // Mutable jobUrl that performScan reports to onJobCreated. Tests that
@@ -890,6 +895,219 @@ describe('ScanOrchestrator', () => {
     });
   });
 
+  describe('cropping through the cropper module', () => {
+    test('clamps bounds that overrun the scan instead of failing the scan', async () => {
+      // realImageBuffer is 400x400; this region overruns it by 100px on both axes.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 300, y: 300, width: 200, height: 200 },
+          }),
+        ],
+        processingTime: 1,
+      });
+      const cropsSeenByEnhancer: Buffer[] = [];
+      enhancePhotoImpl = async (buffer) => {
+        cropsSeenByEnhancer.push(buffer);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      const result = await orchestrator.startFrontScan();
+
+      expect(result.photosDetected).toBe(1);
+      expect(cropsSeenByEnhancer).toHaveLength(1);
+      const crop = await sharp(cropsSeenByEnhancer[0]).metadata();
+      expect(crop.width).toBe(100);
+      expect(crop.height).toBe(100);
+      await cleanup();
+    });
+
+    test('passes the estimated skew angle to the enhancer as a rotation', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const cropsSeenByEstimator: Buffer[] = [];
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async (crop: Buffer) => {
+            cropsSeenByEstimator.push(crop);
+            return 4;
+          },
+        },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true, rotation: 4 }]);
+      // The estimator sees the 100x100 crop, not the 400x400 scan.
+      expect(cropsSeenByEstimator).toHaveLength(1);
+      expect((await sharp(cropsSeenByEstimator[0]).metadata()).width).toBe(100);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('passes no rotation when the estimated skew is inside the dead zone', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: { estimateSkewAngle: async () => -0.2 },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true }]);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('raises ProcessingError when skew estimation fails', async () => {
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async () => {
+            throw new Error('estimator failed');
+          },
+        },
+      });
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('still raises ProcessingError when the cropper rejects a region', async () => {
+      // Starting position beyond the 400x400 scan: nothing to clamp to.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 500, y: 500, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      expect(orchestrator.getState().status).toBe('error');
+      await cleanup();
+    });
+  });
+
+  describe('pairing through the pairing module', () => {
+    test('duplicate front positions produce one pair, keeping the first front', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      let enhanceCalls = 0;
+      enhancePhotoImpl = async () => {
+        enhanceCalls += 1;
+        return { buffer: Buffer.from(`enhanced-${enhanceCalls}`) };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(1);
+      const images = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
+      expect(images).toEqual([join('unknown', 'unknown_001_front.jpg')]);
+      const saved = await readFile(join(result.outputDirectory, images[0] ?? ''));
+      expect(saved.toString()).toBe('enhanced-1');
+      await cleanup();
+    });
+
+    test('saves pairs in canonical grid order regardless of detection order', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 100, y: 100, width: 100, height: 100 },
+          }),
+          makeDetectedPhoto('top-right', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      // File names carry the sequence number; the sidecar carries the position.
+      const positions = await Promise.all(
+        [1, 2, 3].map(async (n) => {
+          const sidecar = await readFile(
+            join(result.outputDirectory, 'unknown', `unknown_00${n}.json`),
+            'utf8',
+          );
+          return JSON.parse(sidecar).gridPosition;
+        }),
+      );
+      expect(positions).toEqual(['top-left', 'top-right', 'bottom-right']);
+      await cleanup();
+    });
+
+    // realImageBuffer is 400x400. The front's centre is (180, 100), top-left;
+    // the back's is (212, 100), top-right: an 8% shift over the midline.
+    const shiftedFront = makeDetectedPhoto('top-left', {
+      bounds: { x: 130, y: 50, width: 100, height: 100 },
+    });
+    const shiftedBack = makeDetectedPhoto('top-right', {
+      bounds: { x: 162, y: 50, width: 100, height: 100 },
+    });
+
+    async function scanShiftedPair(imageDimensions?: { width: number; height: number }) {
+      let detections = 0;
+      detectPhotosImpl = async () => {
+        detections += 1;
+        return {
+          photos: [detections === 1 ? shiftedFront : shiftedBack],
+          processingTime: 1,
+          ...(imageDimensions && { imageDimensions }),
+        };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+      const files = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
+      await cleanup();
+      return files;
+    }
+
+    test('pairs a back that shifted 8% into the neighbouring grid cell', async () => {
+      const files = await scanShiftedPair({ width: 400, height: 400 });
+
+      expect(files).toEqual([
+        join('unknown', 'unknown_001_back.jpg'),
+        join('unknown', 'unknown_001_front.jpg'),
+      ]);
+    });
+
+    test('pairs by grid position only when the detector reports no dimensions', async () => {
+      const files = await scanShiftedPair();
+
+      expect(files).toEqual([join('unknown', 'unknown_001_front.jpg')]);
+    });
+  });
+
   describe('reset', () => {
     test('returns to idle from ready_for_backs', async () => {
       const { orchestrator, cleanup } = await makeOrchestrator();
@@ -1084,6 +1302,187 @@ describe('ScanOrchestrator', () => {
       // Release the still-pending performScan so its catch doesn't leak
       resolveScan(realImageBuffer);
       await scanPromise;
+      await cleanup();
+    });
+
+    // Starts a scan whose eSCL call stays pending, cancels it, and hands back
+    // the controls for settling that call afterwards.
+    async function cancelPendingScan(
+      orchestrator: InstanceType<typeof ScanOrchestrator>,
+      start: () => Promise<unknown>,
+    ) {
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+      let resolveScan: (buf: Buffer) => void = () => undefined;
+      let rejectScan: (error: Error) => void = () => undefined;
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve, reject) => {
+          resolveScan = resolve;
+          rejectScan = reject;
+        });
+
+      let rejection: unknown;
+      const scanPromise = start().catch((error: unknown) => {
+        rejection = error;
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      const scanId =
+        'backScanId' in state ? state.backScanId : 'scanId' in state ? state.scanId : '';
+      expect(await orchestrator.cancelScan(scanId)).toBe(true);
+      expect(orchestrator.getState().status).toBe('idle');
+
+      return { scanId, scanPromise, resolveScan, rejectScan, getRejection: () => rejection };
+    }
+
+    test('a cancelled front scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(orchestrator.getFrontScanResult()).toBeNull();
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect((pending.getRejection() as Error).message).toBe('Scan cancelled by user');
+      await cleanup();
+    });
+
+    test('a cancelled front scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a late rejection of a cancelled scan does not disturb the next scan', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      performScanImpl = async () => realImageBuffer;
+      mockJobUrl = null;
+      await orchestrator.startFrontScan();
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    // Starts a front scan whose eSCL call stays pending, then cancels it with a
+    // cancelScanJob mock that settles that call while the DELETE is still awaited.
+    async function cancelWithScanSettlingDuringDelete(
+      orchestrator: InstanceType<typeof ScanOrchestrator>,
+      settle: (controls: {
+        resolveScan: (buf: Buffer) => void;
+        rejectScan: (error: Error) => void;
+      }) => void,
+    ) {
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+      const controls = {
+        resolveScan: (_buf: Buffer): void => undefined,
+        rejectScan: (_error: Error): void => undefined,
+      };
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve, reject) => {
+          controls.resolveScan = resolve;
+          controls.rejectScan = reject;
+        });
+      cancelScanJobImpl.mockImplementationOnce(async () => {
+        settle(controls);
+        await new Promise((r) => setTimeout(r, 5));
+        return undefined;
+      });
+
+      let rejection: unknown;
+      const scanPromise = orchestrator.startFrontScan().catch((error: unknown) => {
+        rejection = error;
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      const scanId = 'scanId' in state ? state.scanId : '';
+      expect(await orchestrator.cancelScan(scanId)).toBe(true);
+      await scanPromise;
+
+      const cancelledScans = (orchestrator as unknown as { cancelledScans: Set<string> })
+        .cancelledScans;
+      return { rejection: rejection as Error, cancelledScans };
+    }
+
+    test('a scan that rejects while the eSCL DELETE is in flight reports the cancel once', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+
+      const { rejection, cancelledScans } = await cancelWithScanSettlingDuringDelete(
+        orchestrator,
+        ({ rejectScan }) => rejectScan(new ScannerError('Scan job not found (404)')),
+      );
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect(events.stateChanged.map((s) => s.status)).not.toContain('error');
+      expect(rejection.message).toBe('Scan cancelled by user');
+      expect(cancelledScans.size).toBe(0);
+      await cleanup();
+    });
+
+    test('a document that arrives while the eSCL DELETE is in flight is discarded', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+
+      const { rejection, cancelledScans } = await cancelWithScanSettlingDuringDelete(
+        orchestrator,
+        ({ resolveScan }) => resolveScan(realImageBuffer),
+      );
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(orchestrator.getFrontScanResult()).toBeNull();
+      expect(events.complete).toHaveLength(0);
+      expect(events.stateChanged.map((s) => s.status)).not.toContain('ready_for_backs');
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect(rejection.message).toBe('Scan cancelled by user');
+      expect(cancelledScans.size).toBe(0);
       await cleanup();
     });
   });

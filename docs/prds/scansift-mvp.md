@@ -45,9 +45,9 @@ fronts by grid position, and OCR-processed to extract date metadata.
 |----|-------|----------|--------|
 | US-1.1 | Scan 4 photos at once on flatbed | P0 | ✅ Implemented |
 | US-1.2 | Trigger scan from mobile phone | P0 | ✅ Implemented |
-| US-1.3 | Scan fronts then backs, auto-pair by position | P0 | ⚠️ Partial — pairs by exact grid position only (see FR-3.2) |
+| US-1.3 | Scan fronts then backs, auto-pair by position | P0 | ✅ Implemented — position tolerance reaches real scans once the detector segments per photo (see FR-3.2) |
 | US-1.4 | Real-time progress feedback with thumbnails | P0 | ✅ Implemented |
-| US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — auto-crop works, deskew not implemented (see FR-5.2) |
+| US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — crop and deskew run on each detected region, but the detector returns the whole scan as one region (#58) |
 | US-2.2 | Automatic contrast / white-balance enhancement | P1 | ✅ Implemented |
 | US-3.1 | OCR date extraction from photo backs | P1 | ❌ Not implemented |
 | US-3.3 | Date-based folder organization, sidecar JSON | P1 | ✅ Implemented |
@@ -93,7 +93,7 @@ Any stage -> ERROR -> retry or skip
 | ID | Requirement | Status |
 |----|-------------|--------|
 | FR-3.1 | Match fronts to backs by grid position | ✅ Implemented |
-| FR-3.2 | Tolerate position deviation up to 10% | ❌ Not implemented — exact grid-position match only |
+| FR-3.2 | Tolerate position deviation up to 10% | ✅ Implemented — photo centre may shift up to 10% of the scan width and height |
 | FR-3.3 | Gracefully handle missing backs (save front-only) | ✅ Implemented |
 
 ### FR-4: Web Interface
@@ -111,7 +111,7 @@ Any stage -> ERROR -> retry or skip
 | ID | Requirement | Status |
 |----|-------------|--------|
 | FR-5.1 | Crop to detected bounds with 2% margin (Sharp) | ⚠️ Partial — crops to detected bounds; 2% margin not applied |
-| FR-5.2 | Deskew rotation correction | ❌ Not implemented — manual rotation supported in `enhancer.ts`, no auto-deskew |
+| FR-5.2 | Deskew rotation correction | ✅ Implemented — `estimateSkewAngle` in `deskew.ts` (±10°), applied by the orchestrator for estimates of 0.5° or more |
 | FR-5.3 | Auto white-balance and contrast normalization | ✅ Implemented |
 | FR-5.4 | Save as JPEG (quality 95%) with optional PNG archival | ⚠️ Partial — JPEG only; no PNG archival path |
 | FR-5.5 | Preserve original unprocessed scan in `originals/` | ⚠️ Partial — preserved under `raw/` (path drift), not `originals/` |
@@ -189,8 +189,8 @@ Any stage -> ERROR -> retry or skip
 | Event | Payload | Notes |
 |-------|---------|-------|
 | `scan:start` | `{ scanType: 'front' \| 'back' }` | Triggers `startFrontScan()` / `startBackScan()` |
-| `scan:cancel` | `{ scanId }` | ⚠️ Stub — handler logs a warning; no cancellation logic implemented |
-| `scan:skip-backs` | `{ frontScanId }` | ⚠️ Emitted by client (`scan-store.ts`) but no server-side handler; treated as no-op |
+| `scan:cancel` | `{ scanId }` | Calls `cancelScan(scanId)`: eSCL DELETE on the job, state back to `idle`, one `scan:error` ("Scan cancelled by user"). ⚠️ No client code emits it yet |
+| `scan:skip-backs` | `{ frontScanId }` | Calls `skipBacks()`, which cancels an in-flight back scan's eSCL job; the payload is ignored |
 
 ## Out of Scope (MVP)
 
@@ -227,27 +227,35 @@ requirements still need implementation work.
 - **OCR pipeline (US-3.1, FR-6.1–6.4) is unimplemented.** `tesseract.js` is
   declared in `package.json` but is not imported anywhere under `src/`.
   Photo backs are saved as raw JPEGs with no text extraction.
-- **Auto-deskew (FR-5.2) is unimplemented.** `src/server/processing/enhancer.ts`
-  exposes a manual `rotation` option but no rotation-detection logic. This
-  partially undermines US-2.1.
+- **Auto-deskew (FR-5.2) corrects one angle per detected region.**
+  `src/server/processing/deskew.ts` estimates a skew of up to ±10° from each
+  crop and the orchestrator passes it to `enhancePhoto` as `rotation`. Until the
+  detector returns per-photo regions (#58) the crop is the whole scan, so photos
+  lying at different angles on one scan share a single estimate. The estimator
+  has been run on synthetic scans only, not on output from a real scanner.
 - **2% crop margin (FR-5.1) is unimplemented.** `cropPhoto` in
-  `src/server/processing/cropper.ts` extracts the raw detected bounds with no
-  inset/outset margin.
-- **Position-deviation tolerance (FR-3.2) is unimplemented.** Both
-  `pairPhotos` (`src/server/processing/pairing.ts`) and the orchestrator's
-  internal pairing match by *exact* `GridPosition` string. The "up to 10%"
-  tolerance from the PRD does not exist.
+  `src/server/processing/cropper.ts`, which the orchestrator calls for every
+  detected photo, extracts the raw detected bounds with no inset/outset margin.
+- **Position-deviation tolerance (FR-3.2) has no effect on real scans yet.**
+  `pairPhotos` (`src/server/processing/pairing.ts`) pairs a back whose centre
+  is within 10% of the scan width and height of a front's. The detector
+  currently returns one region covering the whole scan (issue #58), so front
+  and back always have the same centre and the tolerance is only exercised by
+  tests with mocked detections.
 - **`originals/` path drift (FR-5.5).** Raw scans are saved to
   `{outputDirectory}/raw/{scanId}-{front|back}.jpg`, not `originals/`. The
   intent (preserve unprocessed scan) is met; only the directory name differs.
 - **PNG archival (FR-5.4) is unimplemented.** Only JPEG output is produced.
   Quality is `95` (mozjpeg), not the `92` originally specified — this PRD has
   been updated to match reality.
-- **`scan:cancel` Socket.IO event is a stub.** The server logs a warning and
-  takes no action; in-flight scans cannot be cancelled.
-- **`scan:skip-backs` has no server handler.** The client emits it, but there
-  is no listener server-side. The user-facing "skip backs" path relies on
-  calling `POST /api/scan/complete` without a back scan, which is supported.
+- **`scan:cancel` has no client caller.** The server handler cancels the eSCL
+  job and returns the orchestrator to `idle`, but the client has no cancel
+  action and holds the placeholder scan id `'pending'`, so the UI cannot
+  cancel a scan.
+- **`scan:skip-backs` does not pair or save.** The server handler cancels an
+  in-flight back scan's eSCL job and nothing else. The user-facing "skip
+  backs" path relies on calling `POST /api/scan/complete` without a back scan,
+  which is supported.
 - **Removed/renamed REST endpoints.** Earlier PRD revisions advertised
   `/api/scan/start`, `/api/scan/pair`, `/api/scan/status/:id`, and `/api/stats`.
   None of these exist in code; the API surface table above lists the actual

@@ -221,6 +221,17 @@ import { detectPhotos } from '../detection/photo-detector';
 - Detects 1-4 photos using edge detection
 - Assigns grid positions (top-left, top-right, etc.)
 
+### Photo Cropping
+
+```typescript
+import { cropPhoto } from '../processing/cropper';
+```
+
+- Extracts each detected region from the raw scan as JPEG (quality 92)
+- Clamps a region that overruns the scan to the scan's edge
+- A region the cropper rejects (start outside the scan, or under 100px after
+  clamping) fails the scan with `ProcessingError`
+
 ### Image Enhancement
 
 ```typescript
@@ -232,10 +243,18 @@ import { enhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 
 ### Photo Pairing
 
+```typescript
+import { pairPhotos } from '../processing/pairing';
+```
+
 Position-based pairing algorithm:
 
 - Matches front/back by grid position
 - Handles missing backs gracefully
+- Emits pairs in grid order (top-left, top-right, bottom-left, bottom-right),
+  which is the order of the saved `photo-NNN-{position}` files
+- Keeps the first photo when two share a position, and logs a warning for
+  duplicates, a front/back count mismatch, and backs without a front
 
 ## Error Handling
 
