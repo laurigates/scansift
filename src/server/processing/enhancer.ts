@@ -67,6 +67,49 @@ const JPEG_QUALITY = 95;
 const PNG_COMPRESSION_LEVEL = 9;
 
 /**
+ * Pixels trimmed from each side of the inscribed rectangle, so the
+ * interpolated edge of the rotated image stays out of the crop.
+ */
+const INSCRIBED_MARGIN_PX = 1;
+
+/**
+ * Size of the largest axis-aligned rectangle that fits inside a width x height
+ * rectangle rotated by `degrees`. It is centred on the rotated rectangle.
+ *
+ * @param width - Width of the image before rotation
+ * @param height - Height of the image before rotation
+ * @param degrees - Rotation angle
+ * @returns Width and height of the inscribed rectangle (fractional)
+ */
+export function inscribedRectangle(
+  width: number,
+  height: number,
+  degrees: number,
+): { width: number; height: number } {
+  const radians = (degrees * Math.PI) / 180;
+  const sin = Math.abs(Math.sin(radians));
+  const cos = Math.abs(Math.cos(radians));
+  const widthIsLonger = width >= height;
+  const long = widthIsLonger ? width : height;
+  const short = widthIsLonger ? height : width;
+
+  if (short <= 2 * sin * cos * long || Math.abs(sin - cos) < 1e-10) {
+    // Half-constrained: two corners of the crop touch the long sides.
+    const half = short / 2;
+    return widthIsLonger
+      ? { width: half / sin, height: half / cos }
+      : { width: half / cos, height: half / sin };
+  }
+
+  // Fully constrained: the crop touches all four sides.
+  const cos2 = cos * cos - sin * sin;
+  return {
+    width: (width * cos - height * sin) / cos2,
+    height: (height * cos - width * sin) / cos2,
+  };
+}
+
+/**
  * Preset: Minimal processing - sharpen only.
  * Use for high-quality scans that need minor touch-up.
  */
@@ -100,7 +143,8 @@ export const PRESET_VINTAGE: EnhancementOptions = {
  *
  * Processing pipeline:
  * 1. Load and validate image
- * 2. Apply rotation (if specified)
+ * 2. Apply rotation (if specified); after a rotation that is not a multiple
+ *    of 90 degrees, crop to the rectangle inscribed in the rotated image
  * 3. Apply white balance correction (if enabled)
  * 4. Apply normalization (contrast/brightness)
  * 5. Apply gamma correction (if specified)
@@ -150,11 +194,36 @@ export async function enhancePhoto(
     // Update dimensions for 90/270 degree rotations
     if (Math.abs(options.rotation) === 90 || Math.abs(options.rotation) === 270) {
       [currentWidth, currentHeight] = [currentHeight, currentWidth];
-    } else if (options.rotation !== 180 && options.rotation !== -180) {
-      // For arbitrary angles, dimensions will change - recalculate after processing
-      const rotatedMetadata = await pipeline.metadata();
-      currentWidth = rotatedMetadata.width || currentWidth;
-      currentHeight = rotatedMetadata.height || currentHeight;
+    } else if (options.rotation % 90 !== 0) {
+      // An arbitrary angle enlarges the canvas and fills the corners with the
+      // background. Render the rotation to learn the canvas size sharp
+      // produced, then crop to the rectangle inscribed in the rotated image.
+      let rotated: { data: Buffer; info: sharp.OutputInfo };
+      try {
+        rotated = await pipeline.raw().toBuffer({ resolveWithObject: true });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        throw new Error(`Image processing failed: ${errorMessage}`);
+      }
+      const { info } = rotated;
+      const inscribed = inscribedRectangle(currentWidth, currentHeight, options.rotation);
+      const width = Math.max(1, Math.floor(inscribed.width) - 2 * INSCRIBED_MARGIN_PX);
+      const height = Math.max(1, Math.floor(inscribed.height) - 2 * INSCRIBED_MARGIN_PX);
+      const left = Math.max(0, Math.floor((info.width - width) / 2));
+      const top = Math.max(0, Math.floor((info.height - height) / 2));
+
+      pipeline = sharp(rotated.data, {
+        raw: { width: info.width, height: info.height, channels: info.channels },
+      }).extract({ left, top, width, height });
+
+      appliedEnhancements.push({
+        type: 'crop',
+        description: `Cropped to ${width}x${height} to remove the corners left by rotation`,
+        parameters: { left, top, width, height },
+      });
+
+      currentWidth = width;
+      currentHeight = height;
     }
   }
 

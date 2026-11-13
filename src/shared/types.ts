@@ -104,11 +104,19 @@ export type ClientEvent =
   | { type: 'scan:start'; scanType: 'front' | 'back' }
   | { type: 'scan:cancel'; scanId: string };
 
+// Pixel dimensions of a scanned image
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
 // Photo detection result
 export interface DetectionResult {
   photos: DetectedPhoto[];
   processingTime: number; // milliseconds
   warnings?: string[];
+  /** Dimensions of the scan the photo bounds are measured in */
+  imageDimensions?: ImageDimensions;
 }
 
 // Image enhancement options
@@ -124,7 +132,7 @@ export interface EnhancementOptions {
 
 // Applied enhancement details for tracking
 export interface AppliedEnhancement {
-  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'whiteBalance' | 'format';
+  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'crop' | 'whiteBalance' | 'format';
   description: string;
   parameters?: Record<string, number | boolean | string>;
 }
@@ -154,6 +162,8 @@ export interface ScanResult {
   rawImagePath: string;
   timestamp: Date;
   detectedPhotos: DetectedPhoto[];
+  /** Dimensions of the raw scan, when the detector reported them */
+  imageDimensions?: ImageDimensions;
 }
 
 // Batch result from completing a batch
