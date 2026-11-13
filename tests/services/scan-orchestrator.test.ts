@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { batches, createDb, pairs, photos } from '../../src/server/db';
+import type { OrchestratorDependencies } from '../../src/server/services/scan-orchestrator';
 import { PROGRESS_WEIGHTS } from '../../src/shared/constants';
 import type {
   BatchResult,
@@ -138,7 +140,7 @@ function attachListeners(orchestrator: InstanceType<typeof ScanOrchestrator>) {
   return events;
 }
 
-async function makeOrchestrator(opts?: { scanTimeout?: number }) {
+async function makeOrchestrator(opts?: { scanTimeout?: number; deps?: OrchestratorDependencies }) {
   const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
   const orchestrator = new ScanOrchestrator({ outputDirectory: tmp, ...opts });
   return { orchestrator, tmp, cleanup: () => rm(tmp, { recursive: true, force: true }) };
@@ -531,6 +533,196 @@ describe('ScanOrchestrator', () => {
         expect(state.recoverable).toBe(false);
       }
       expect(events.errors[0]?.error).toBeInstanceOf(StorageError);
+      await cleanup();
+    });
+  });
+
+  describe('persistence', () => {
+    test('front + back batch writes one batches row, one photos row and one pairs row per pair', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      // Delay the scan so "captured at front-scan start" is distinguishable
+      // from the ScanResult timestamp, which is set after detection.
+      performScanImpl = async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return realImageBuffer;
+      };
+
+      const beforeFront = new Date().toISOString();
+      const front = await orchestrator.startFrontScan();
+      const back = await orchestrator.startBackScan();
+      const result = await orchestrator.completeBatch();
+
+      const batchRows = db.select().from(batches).all();
+      expect(batchRows).toHaveLength(1);
+      const batch = batchRows[0];
+      expect(batch?.id).toBe(result.batchId);
+      expect(batch?.status).toBe('complete');
+      expect(batch?.outputDirectory).toBe(result.outputDirectory);
+      expect(batch?.completedAt).toBeTruthy();
+      // ISO-8601 UTC strings compare lexicographically in time order.
+      expect((batch?.startedAt ?? '') >= beforeFront).toBe(true);
+      expect((batch?.startedAt ?? 'z') < front.timestamp.toISOString()).toBe(true);
+      expect((batch?.startedAt ?? 'z') <= (batch?.completedAt ?? '')).toBe(true);
+
+      const photoRows = db.select().from(photos).orderBy(photos.id).all();
+      expect(photoRows).toHaveLength(2);
+      expect(photoRows.map((p) => p.gridPosition)).toEqual(['top-left', 'top-right']);
+      for (const row of photoRows) {
+        expect(row.batchId).toBe(result.batchId);
+        expect(row.frontFilePath.startsWith(result.outputDirectory)).toBe(true);
+        expect(row.frontFilePath.endsWith('-front.jpg')).toBe(true);
+        await access(row.frontFilePath);
+        expect(row.backFilePath?.endsWith('-back.jpg')).toBe(true);
+        await access(row.backFilePath ?? '');
+        expect(row.originalFrontPath).toBe(front.rawImagePath);
+        expect(row.originalBackPath).toBe(back.rawImagePath);
+        expect(row.scanDate).toBe(front.timestamp.toISOString());
+      }
+
+      const pairRows = db.select().from(pairs).orderBy(pairs.id).all();
+      expect(pairRows).toHaveLength(2);
+      expect(pairRows.map((p) => p.frontPhotoId)).toEqual(photoRows.map((p) => p.id));
+      for (const row of pairRows) {
+        expect(row.batchId).toBe(result.batchId);
+        expect(row.backPhotoId).toBeNull();
+      }
+      await cleanup();
+    });
+
+    test('front-only batch leaves back_file_path and original_back_path null', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const photoRows = db.select().from(photos).all();
+      expect(photoRows).toHaveLength(2);
+      for (const row of photoRows) {
+        expect(row.backFilePath).toBeNull();
+        expect(row.originalBackPath).toBeNull();
+      }
+      expect(db.select().from(pairs).all()).toHaveLength(2);
+      await cleanup();
+    });
+
+    test('maps OCR metadata to photo_date, extracted_text and confidence_score, preferring the back', async () => {
+      const db = createDb(':memory:');
+      const backDate = new Date('1985-07-20T00:00:00.000Z');
+      // The enhancer stub returns one buffer per call, so tag each side to
+      // let the OCR stub tell fronts from backs.
+      let side: 'front' | 'back' = 'front';
+      enhancePhotoImpl = async () => ({ buffer: Buffer.from(side) });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async (image) =>
+        image.toString() === 'back'
+          ? { extractedText: 'Summer 1985', extractedDate: backDate, confidence: 0.8, words: [] }
+          : { extractedText: 'front text', confidence: 0.3, words: [] };
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db, extractMetadata } });
+
+      await orchestrator.startFrontScan();
+      side = 'back';
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      const photoRows = db.select().from(photos).all();
+      expect(photoRows).toHaveLength(2);
+      for (const row of photoRows) {
+        expect(row.photoDate).toBe(backDate.toISOString());
+        expect(row.extractedText).toBe('Summer 1985');
+        expect(row.confidenceScore).toBeCloseTo(0.8);
+      }
+      await cleanup();
+    });
+
+    test('falls back to front OCR metadata when there is no back', async () => {
+      const db = createDb(':memory:');
+      const frontDate = new Date('1990-01-02T00:00:00.000Z');
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedText: 'Jan 1990',
+        extractedDate: frontDate,
+        confidence: 0.6,
+        words: [],
+      });
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db, extractMetadata } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.photoDate).toBe(frontDate.toISOString());
+      expect(row?.extractedText).toBe('Jan 1990');
+      expect(row?.confidenceScore).toBeCloseTo(0.6);
+      await cleanup();
+    });
+
+    test('stores detection confidence and null text/date when OCR finds no text', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.photoDate).toBeNull();
+      expect(row?.extractedText).toBeNull();
+      // makeDetectedPhoto sets detection confidence to 0.95
+      expect(row?.confidenceScore).toBeCloseTo(0.95);
+      await cleanup();
+    });
+
+    test('a failing database write does not abort the batch', async () => {
+      const db = createDb(':memory:');
+      // Every statement against a closed connection throws.
+      db.$client.close();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ deps: { db } });
+      const events = attachListeners(orchestrator);
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(2);
+      const files = await readdir(join(tmp, result.batchId));
+      expect(files.filter((f) => f.includes('-front.jpg'))).toHaveLength(2);
+      expect(events.batchComplete).toHaveLength(1);
+      expect(events.errors).toHaveLength(0);
+      expect(orchestrator.getState().status).toBe('idle');
+      await cleanup();
+    });
+
+    test('a write that fails part-way leaves no rows behind', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      // The batches row is inserted before the photos rows; a NOT NULL
+      // violation on photos.original_front_path must roll it back.
+      const frontResult = orchestrator.getFrontScanResult();
+      if (frontResult) {
+        // biome-ignore lint/suspicious/noExplicitAny: force a NOT NULL violation on original_front_path
+        (frontResult as any).rawImagePath = null;
+      }
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(2);
+      expect(db.select().from(batches).all()).toHaveLength(0);
+      expect(db.select().from(photos).all()).toHaveLength(0);
+      expect(db.select().from(pairs).all()).toHaveLength(0);
+      await cleanup();
+    });
+
+    test('a second batch records its own started_at', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      const first = await orchestrator.completeBatch();
+      await new Promise((r) => setTimeout(r, 5));
+      await orchestrator.startFrontScan();
+      const second = await orchestrator.completeBatch();
+
+      const rows = db.select().from(batches).all();
+      expect(rows).toHaveLength(2);
+      const firstRow = rows.find((r) => r.id === first.batchId);
+      const secondRow = rows.find((r) => r.id === second.batchId);
+      expect((secondRow?.startedAt ?? '') > (firstRow?.completedAt ?? 'z')).toBe(true);
+      expect(db.select().from(photos).all()).toHaveLength(4);
       await cleanup();
     });
   });
