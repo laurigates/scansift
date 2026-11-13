@@ -563,6 +563,74 @@ describe('ScanOrchestrator', () => {
       await cleanup();
     });
 
+    test('passes the estimated skew angle to the enhancer as a rotation', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const cropsSeenByEstimator: Buffer[] = [];
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async (crop: Buffer) => {
+            cropsSeenByEstimator.push(crop);
+            return 4;
+          },
+        },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true, rotation: 4 }]);
+      // The estimator sees the 100x100 crop, not the 400x400 scan.
+      expect(cropsSeenByEstimator).toHaveLength(1);
+      expect((await sharp(cropsSeenByEstimator[0]).metadata()).width).toBe(100);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('passes no rotation when the estimated skew is inside the dead zone', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: { estimateSkewAngle: async () => -0.2 },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true }]);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('raises ProcessingError when skew estimation fails', async () => {
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async () => {
+            throw new Error('estimator failed');
+          },
+        },
+      });
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
     test('still raises ProcessingError when the cropper rejects a region', async () => {
       // Starting position beyond the 400x400 scan: nothing to clamp to.
       detectPhotosImpl = async () => ({
