@@ -43,39 +43,16 @@ export async function detectPhotos(imageBuffer: Buffer, dpi: number): Promise<De
       throw new Error('Invalid image dimensions');
     }
 
-    // Apply edge detection using Sobel operator via Sharp's convolve
-    // Then analyze the result to find photo boundaries
-    const { data: edgeData } = await sharp(imageBuffer)
+    // Decode to raw greyscale once. The Sobel magnitude is computed here rather
+    // than with Sharp's convolve, whose 8-bit output clamps negative responses
+    // to 0 and so reports only one edge polarity per kernel.
+    const { data: grayData, info } = await sharp(imageBuffer)
       .grayscale()
-      .convolve({
-        width: 3,
-        height: 3,
-        kernel: [-1, 0, 1, -2, 0, 2, -1, 0, 1], // Sobel X
-      })
       .raw()
       .toBuffer({ resolveWithObject: true });
-
-    const { data: edgeDataY } = await sharp(imageBuffer)
-      .grayscale()
-      .convolve({
-        width: 3,
-        height: 3,
-        kernel: [-1, -2, -1, 0, 0, 0, 1, 2, 1], // Sobel Y
-      })
-      .raw()
-      .toBuffer({ resolveWithObject: true });
-
-    // Combine edge magnitudes
-    const edgeDataArray =
-      edgeData instanceof Uint8Array ? edgeData : new Uint8Array(edgeData as Buffer);
-    const edgeDataYArray =
-      edgeDataY instanceof Uint8Array ? edgeDataY : new Uint8Array(edgeDataY as Buffer);
-    const edges = new Uint8Array(edgeDataArray.length);
-    for (let i = 0; i < edges.length; i++) {
-      const gx = (edgeDataArray[i] ?? 0) - 128; // Center around 0
-      const gy = (edgeDataYArray[i] ?? 0) - 128;
-      edges[i] = Math.min(255, Math.sqrt(gx * gx + gy * gy));
-    }
+    const gray =
+      info.channels === 1 ? grayData : grayData.filter((_, i) => i % info.channels === 0);
+    const edges = sobelMagnitude(gray, width, height);
 
     // Find horizontal and vertical edge lines (projection profile method)
     const horizontalProfile = new Float32Array(height);
@@ -109,7 +86,7 @@ export async function detectPhotos(imageBuffer: Buffer, dpi: number): Promise<De
       width,
       height,
       minPhotoSizePx,
-    );
+    ).filter((region) => hasPhotoContent(gray, width, height, region));
 
     if (regions.length === 0) {
       warnings.push('No photos detected - try adjusting photo placement');
@@ -128,12 +105,87 @@ export async function detectPhotos(imageBuffer: Buffer, dpi: number): Promise<De
       photos,
       processingTime,
       warnings,
+      imageDimensions: { width, height },
     };
   } catch (error) {
     throw new Error(
       `Photo detection failed: ${error instanceof Error ? error.message : String(error)}`,
     );
   }
+}
+
+/**
+ * Sobel gradient magnitude (|gx| + |gy|, clamped to 255) of a greyscale image.
+ * Both edge polarities contribute; border pixels are left at 0.
+ */
+function sobelMagnitude(gray: Uint8Array, width: number, height: number): Uint8Array {
+  const edges = new Uint8Array(width * height);
+  const at = (i: number): number => gray[i] ?? 0;
+
+  for (let y = 1; y < height - 1; y++) {
+    for (let x = 1; x < width - 1; x++) {
+      const i = y * width + x;
+      const up = i - width;
+      const down = i + width;
+      const gx =
+        at(up + 1) + 2 * at(i + 1) + at(down + 1) - at(up - 1) - 2 * at(i - 1) - at(down - 1);
+      const gy = at(down - 1) + 2 * at(down) + at(down + 1) - at(up - 1) - 2 * at(up) - at(up + 1);
+      edges[i] = Math.min(255, Math.abs(gx) + Math.abs(gy));
+    }
+  }
+
+  return edges;
+}
+
+// Grey-level distance from the page background above which a pixel counts as photo content
+const CONTENT_GRAY_DELTA = 25;
+
+// Fraction of a region that must be content for the region to count as a photo
+const MIN_CONTENT_FRACTION = 0.5;
+
+// Regions and the page border are sampled on a grid of roughly this many steps per side
+const CONTENT_SAMPLE_STEPS = 64;
+
+/**
+ * Estimate the page background as the median grey level along the image border.
+ */
+function borderMedian(gray: Uint8Array, width: number, height: number): number {
+  const samples: number[] = [];
+  const stepX = Math.max(1, Math.floor(width / CONTENT_SAMPLE_STEPS));
+  const stepY = Math.max(1, Math.floor(height / CONTENT_SAMPLE_STEPS));
+
+  for (let x = 0; x < width; x += stepX) {
+    samples.push(gray[x] ?? 0, gray[(height - 1) * width + x] ?? 0);
+  }
+  for (let y = 0; y < height; y += stepY) {
+    samples.push(gray[y * width] ?? 0, gray[y * width + width - 1] ?? 0);
+  }
+
+  samples.sort((a, b) => a - b);
+  return samples[Math.floor(samples.length / 2)] ?? 0;
+}
+
+/**
+ * Whether a candidate region holds a photo rather than empty scanner bed:
+ * at least half of its sampled pixels differ from the page background.
+ */
+function hasPhotoContent(gray: Uint8Array, width: number, height: number, region: Region): boolean {
+  const background = borderMedian(gray, width, height);
+  const stepX = Math.max(1, Math.floor(region.width / CONTENT_SAMPLE_STEPS));
+  const stepY = Math.max(1, Math.floor(region.height / CONTENT_SAMPLE_STEPS));
+
+  let total = 0;
+  let content = 0;
+  for (let y = region.y; y < region.y + region.height; y += stepY) {
+    for (let x = region.x; x < region.x + region.width; x += stepX) {
+      total++;
+      if (Math.abs((gray[y * width + x] ?? 0) - background) > CONTENT_GRAY_DELTA) {
+        content++;
+      }
+    }
+  }
+
+  return total > 0 && content / total >= MIN_CONTENT_FRACTION;
 }
 
 /**
@@ -226,55 +278,82 @@ function createRegionsFromEdges(
   return regions;
 }
 
+const POSITION_ORDER: GridPosition[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
+
+// A centre within this fraction of the page size from a midline counts as on it,
+// so a centred photo does not change quadrant on a one-pixel edge shift.
+const MIDLINE_TOLERANCE = 0.01;
+
 /**
- * Assign grid positions to detected photos.
+ * Assign grid positions to detected photos. Each position is used at most once:
+ * the region nearest a quadrant's centre claims it, and a region whose own
+ * quadrant is taken gets the free quadrant nearest its centre.
+ * A centre on a midline counts as top / left.
  */
 function assignGridPositions(
   regions: Region[],
   imageWidth: number,
   imageHeight: number,
 ): DetectedPhoto[] {
-  if (regions.length === 0) {
-    return [];
-  }
-
   const midX = imageWidth / 2;
   const midY = imageHeight / 2;
+  const free = new Set<GridPosition>(POSITION_ORDER);
 
-  const photos: DetectedPhoto[] = regions.map((region) => {
-    const centerX = region.x + region.width / 2;
-    const centerY = region.y + region.height / 2;
+  const quadrantCentre = (position: GridPosition): { x: number; y: number } => ({
+    x: position.endsWith('left') ? imageWidth / 4 : (imageWidth * 3) / 4,
+    y: position.startsWith('top') ? imageHeight / 4 : (imageHeight * 3) / 4,
+  });
 
-    const isLeft = centerX < midX;
-    const isTop = centerY < midY;
+  const distanceTo = (position: GridPosition, x: number, y: number): number => {
+    const centre = quadrantCentre(position);
+    return (centre.x - x) ** 2 + (centre.y - y) ** 2;
+  };
 
-    let position: GridPosition;
-    if (isTop && isLeft) {
-      position = 'top-left';
-    } else if (isTop && !isLeft) {
-      position = 'top-right';
-    } else if (!isTop && isLeft) {
-      position = 'bottom-left';
-    } else {
-      position = 'bottom-right';
+  // The region closest to a quadrant's centre claims it first
+  const candidates = regions
+    .map((region) => {
+      const centerX = region.x + region.width / 2;
+      const centerY = region.y + region.height / 2;
+      const isLeft = centerX <= midX + imageWidth * MIDLINE_TOLERANCE;
+      const isTop = centerY <= midY + imageHeight * MIDLINE_TOLERANCE;
+      const preferred: GridPosition = `${isTop ? 'top' : 'bottom'}-${isLeft ? 'left' : 'right'}`;
+      return { region, centerX, centerY, preferred };
+    })
+    .sort(
+      (a, b) =>
+        distanceTo(a.preferred, a.centerX, a.centerY) -
+        distanceTo(b.preferred, b.centerX, b.centerY),
+    );
+
+  const photos: DetectedPhoto[] = [];
+
+  for (const { region, centerX, centerY, preferred } of candidates) {
+    let position: GridPosition | undefined = free.has(preferred) ? preferred : undefined;
+    if (!position) {
+      let best = Number.POSITIVE_INFINITY;
+      for (const candidate of free) {
+        const distance = distanceTo(candidate, centerX, centerY);
+        if (distance < best) {
+          best = distance;
+          position = candidate;
+        }
+      }
     }
+    if (!position) break; // more regions than grid slots
+    free.delete(position);
 
     const aspectRatio = region.width / region.height;
     const confidence = aspectRatio > 0.5 && aspectRatio < 2.0 ? 0.8 : 0.6;
 
-    return {
+    photos.push({
       image: Buffer.alloc(0),
       position,
       bounds: region,
       confidence,
-    };
-  });
+    });
+  }
 
-  const positionOrder: GridPosition[] = ['top-left', 'top-right', 'bottom-left', 'bottom-right'];
-
-  photos.sort((a, b) => {
-    return positionOrder.indexOf(a.position) - positionOrder.indexOf(b.position);
-  });
+  photos.sort((a, b) => POSITION_ORDER.indexOf(a.position) - POSITION_ORDER.indexOf(b.position));
 
   return photos;
 }

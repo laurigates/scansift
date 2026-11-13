@@ -17,12 +17,11 @@ import { EventEmitter } from 'node:events';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { PROGRESS_WEIGHTS, TIMEOUTS } from '@shared/constants';
-import sharp from 'sharp';
 // Import types
 import type {
   BatchResult,
+  CroppedPhoto,
   DetectedPhoto,
-  GridPosition,
   PhotoMetadata,
   PhotoPair,
   ScanOptions,
@@ -33,8 +32,11 @@ import { batches, type Db, pairs, photos } from '../db';
 import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector';
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
+import { cropPhoto as defaultCropPhoto } from '../processing/cropper';
+import { estimateSkewAngle as defaultEstimateSkewAngle } from '../processing/deskew';
 import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
+import { pairPhotos } from '../processing/pairing';
 // Import existing modules
 import {
   type DiscoveredScanner,
@@ -52,6 +54,8 @@ export interface OrchestratorDependencies {
   discoverScanners?: typeof defaultDiscoverScanners;
   performScan?: typeof defaultEsclPerformScan;
   detectPhotos?: typeof defaultDetectPhotos;
+  cropPhoto?: typeof defaultCropPhoto;
+  estimateSkewAngle?: typeof defaultEstimateSkewAngle;
   enhancePhoto?: typeof defaultEnhancePhoto;
   extractMetadata?: typeof defaultExtractMetadata;
   cancelScanJob?: typeof defaultCancelScanJob;
@@ -96,6 +100,24 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
  */
 const DEFAULT_OUTPUT_DIR = './scanned-photos';
 
+const SCAN_CANCELLED_MESSAGE = 'Scan cancelled by user';
+
+/**
+ * Smallest estimated skew, in degrees, that is corrected. Rotating resamples
+ * the photo and crops its border, so smaller estimates are left alone.
+ */
+const MIN_DESKEW_DEGREES = 0.5;
+
+/**
+ * Present a processed DetectedPhoto in the shape pairPhotos takes.
+ */
+const toCroppedPhoto = (photo: DetectedPhoto): CroppedPhoto => ({
+  image: photo.image,
+  position: photo.position,
+  bounds: photo.bounds,
+  originalBounds: photo.bounds,
+});
+
 /**
  * Scan Orchestrator Service
  *
@@ -111,6 +133,8 @@ export class ScanOrchestrator extends EventEmitter {
   private discoverScanners: typeof defaultDiscoverScanners;
   private esclPerformScan: typeof defaultEsclPerformScan;
   private detectPhotos: typeof defaultDetectPhotos;
+  private cropPhoto: typeof defaultCropPhoto;
+  private estimateSkewAngle: typeof defaultEstimateSkewAngle;
   private enhancePhoto: typeof defaultEnhancePhoto;
   private extractMetadata: typeof defaultExtractMetadata;
   private cancelScanJob: typeof defaultCancelScanJob;
@@ -127,6 +151,9 @@ export class ScanOrchestrator extends EventEmitter {
    * dispatch an eSCL DELETE against the active job.
    */
   private activeScans = new Map<string, { jobUrl: string }>();
+  // scanIds cancelled by cancelScan() whose startFrontScan/startBackScan call
+  // has not unwound yet. Entries are removed when that call's catch runs.
+  private cancelledScans = new Set<string>();
 
   constructor(options?: {
     scanTimeout?: number;
@@ -139,6 +166,8 @@ export class ScanOrchestrator extends EventEmitter {
     this.discoverScanners = options?.deps?.discoverScanners ?? defaultDiscoverScanners;
     this.esclPerformScan = options?.deps?.performScan ?? defaultEsclPerformScan;
     this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
+    this.cropPhoto = options?.deps?.cropPhoto ?? defaultCropPhoto;
+    this.estimateSkewAngle = options?.deps?.estimateSkewAngle ?? defaultEstimateSkewAngle;
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
     this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
     this.cancelScanJob = options?.deps?.cancelScanJob ?? defaultCancelScanJob;
@@ -200,6 +229,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Perform scan
       const rawImage = await this.performScan(scanner, mergedOptions, scanId, 'front');
+      this.throwIfCancelled(scanId);
 
       // Save raw scan
       const rawImagePath = await this.saveRawScan(rawImage, scanId, 'front');
@@ -237,6 +267,9 @@ export class ScanOrchestrator extends EventEmitter {
         rawImagePath,
         timestamp: new Date(),
         detectedPhotos,
+        ...(detectionResult.imageDimensions && {
+          imageDimensions: detectionResult.imageDimensions,
+        }),
       };
 
       // Store for later pairing
@@ -253,6 +286,10 @@ export class ScanOrchestrator extends EventEmitter {
 
       return scanResult;
     } catch (error) {
+      // cancelScan() already reset the state and emitted scan:error
+      if (this.cancelledScans.delete(scanId)) {
+        throw new Error(SCAN_CANCELLED_MESSAGE);
+      }
       this.handleError(scanId, error as Error);
       throw error;
     }
@@ -297,6 +334,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Perform scan
       const rawImage = await this.performScan(scanner, mergedOptions, scanId, 'back');
+      this.throwIfCancelled(scanId);
 
       // Save raw scan
       const rawImagePath = await this.saveRawScan(rawImage, scanId, 'back');
@@ -335,6 +373,9 @@ export class ScanOrchestrator extends EventEmitter {
         rawImagePath,
         timestamp: new Date(),
         detectedPhotos,
+        ...(detectionResult.imageDimensions && {
+          imageDimensions: detectionResult.imageDimensions,
+        }),
       };
 
       // Store for pairing
@@ -351,6 +392,10 @@ export class ScanOrchestrator extends EventEmitter {
 
       return scanResult;
     } catch (error) {
+      // cancelScan() already reset the state and emitted scan:error
+      if (this.cancelledScans.delete(scanId)) {
+        throw new Error(SCAN_CANCELLED_MESSAGE);
+      }
       this.handleError(scanId, error as Error);
       throw error;
     }
@@ -373,10 +418,18 @@ export class ScanOrchestrator extends EventEmitter {
       // Update state to saving
       this.updateState({ status: 'saving', batchId });
 
-      // Pair photos
-      const photoPairs = this.pairPhotos(
-        this._frontScanResult.detectedPhotos,
-        this.backScanResult?.detectedPhotos ?? [],
+      // Pair photos. pairPhotos logs its own warnings (duplicate positions,
+      // count mismatch, backs without a front). With the dimensions of both
+      // scans it tolerates a photo shifting between the two passes.
+      const frontDimensions = this._frontScanResult.imageDimensions;
+      const backDimensions = this.backScanResult?.imageDimensions;
+      const { pairs: photoPairs } = pairPhotos(
+        this._frontScanResult.detectedPhotos.map(toCroppedPhoto),
+        (this.backScanResult?.detectedPhotos ?? []).map(toCroppedPhoto),
+        {
+          ...(frontDimensions && { frontDimensions }),
+          ...(backDimensions && { backDimensions }),
+        },
       );
 
       // Enrich pairs with OCR metadata (run in parallel across all photo sides)
@@ -585,18 +638,32 @@ export class ScanOrchestrator extends EventEmitter {
 
     logger.info({ scanId, jobUrl: active.jobUrl }, 'Cancelling scan');
 
+    // Mark the scanId before awaiting the DELETE. The in-flight performScan
+    // call settles at some point (a document, a scanner error or a timeout),
+    // possibly while the DELETE is still pending; the mark makes
+    // startFrontScan/startBackScan stop there without touching the state or
+    // emitting again.
+    this.cancelledScans.add(scanId);
+
     // Best-effort cancel — cancelScanJob never throws (see escl-client.ts)
     await this.cancelScanJob(active.jobUrl);
 
     this.activeScans.delete(scanId);
 
-    // Move back to idle so the UI can start fresh. The in-flight performScan
-    // call will reject on the next scanner interaction and its catch handler
-    // will become a no-op since the state already shows idle.
+    // Move back to idle so the UI can start fresh.
     this.updateState({ status: 'idle' });
-    this.emit('scan:error', scanId, new Error('Scan cancelled by user'));
+    this.emit('scan:error', scanId, new Error(SCAN_CANCELLED_MESSAGE));
 
     return true;
+  }
+
+  /**
+   * Stop a scan whose eSCL call returned a document after cancelScan() ran.
+   */
+  private throwIfCancelled(scanId: string): void {
+    if (this.cancelledScans.has(scanId)) {
+      throw new Error(SCAN_CANCELLED_MESSAGE);
+    }
   }
 
   /**
@@ -650,7 +717,7 @@ export class ScanOrchestrator extends EventEmitter {
   }
 
   /**
-   * Crop and enhance detected photos
+   * Crop, deskew and enhance detected photos
    */
   private async cropAndEnhancePhotos(
     rawImage: Buffer,
@@ -661,18 +728,19 @@ export class ScanOrchestrator extends EventEmitter {
 
     for (const photo of detectedPhotos) {
       try {
-        // Extract region from raw image
-        const cropped = await sharp(rawImage)
-          .extract({
-            left: photo.bounds.x,
-            top: photo.bounds.y,
-            width: photo.bounds.width,
-            height: photo.bounds.height,
-          })
-          .toBuffer();
+        // Extract region from raw image. cropPhoto clamps a region that
+        // overruns the scan and throws on one it cannot use; cropAllPhotos is
+        // not used because it drops such photos silently.
+        const cropped = await this.cropPhoto(rawImage, photo.bounds);
 
-        // Enhance cropped photo
-        const enhanced = await this.enhancePhoto(cropped, PRESET_STANDARD);
+        // Straighten (FR-5.2) and enhance the cropped photo
+        const skew = await this.estimateSkewAngle(cropped);
+        const enhanced = await this.enhancePhoto(
+          cropped,
+          Math.abs(skew) >= MIN_DESKEW_DEGREES
+            ? { ...PRESET_STANDARD, rotation: skew }
+            : PRESET_STANDARD,
+        );
 
         // Update photo with processed image
         processed.push({
@@ -699,47 +767,6 @@ export class ScanOrchestrator extends EventEmitter {
       logger.warn({ err: error }, 'OCR enrichment failed for photo; continuing without metadata');
       return { confidence: 0, words: [] };
     }
-  }
-
-  /**
-   * Pair front and back photos by grid position
-   */
-  private pairPhotos(fronts: DetectedPhoto[], backs: DetectedPhoto[]): PhotoPair[] {
-    const pairs: PhotoPair[] = [];
-
-    // Create map of backs by position
-    const backsByPosition = new Map<GridPosition, DetectedPhoto>();
-    for (const back of backs) {
-      backsByPosition.set(back.position, back);
-    }
-
-    // Pair each front with corresponding back
-    for (const front of fronts) {
-      const back = backsByPosition.get(front.position);
-
-      const photoPair: PhotoPair = {
-        front: {
-          image: front.image,
-          position: front.position,
-          bounds: front.bounds,
-          originalBounds: front.bounds,
-        },
-        position: front.position,
-      };
-
-      if (back) {
-        photoPair.back = {
-          image: back.image,
-          position: back.position,
-          bounds: back.bounds,
-          originalBounds: back.bounds,
-        };
-      }
-
-      pairs.push(photoPair);
-    }
-
-    return pairs;
   }
 
   /**
