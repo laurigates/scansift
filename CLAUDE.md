@@ -9,7 +9,7 @@ ScanSift is a network-enabled batch photo scanning application for digitizing ph
 - **Runtime**: Bun
 - **Language**: TypeScript (strict mode, ES2022 target)
 - **Server**: Fastify with Socket.IO for real-time updates
-- **Client**: React 18 with Vite, Tailwind CSS, Radix UI
+- **Client**: React 19 with Vite, Tailwind CSS, Radix UI
 - **State Management**: Zustand
 - **Image Processing**: Sharp
 - **OCR**: Not yet implemented (see PRD-001 known drift)

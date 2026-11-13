@@ -27,7 +27,7 @@
 
 - **Runtime**: [Bun](https://bun.sh)
 - **Server**: Fastify with WebSocket support
-- **Client**: React 18 with Vite, Tailwind CSS, Radix UI
+- **Client**: React 19 with Vite, Tailwind CSS, Radix UI
 - **Image Processing**: Sharp, OpenCV.js
 - **State Management**: Zustand
 - **Database**: SQLite with Drizzle ORM
