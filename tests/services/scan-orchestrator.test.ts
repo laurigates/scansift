@@ -726,6 +726,111 @@ describe('ScanOrchestrator', () => {
       await scanPromise;
       await cleanup();
     });
+
+    // Starts a scan whose eSCL call stays pending, cancels it, and hands back
+    // the controls for settling that call afterwards.
+    async function cancelPendingScan(
+      orchestrator: InstanceType<typeof ScanOrchestrator>,
+      start: () => Promise<unknown>,
+    ) {
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+      let resolveScan: (buf: Buffer) => void = () => undefined;
+      let rejectScan: (error: Error) => void = () => undefined;
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve, reject) => {
+          resolveScan = resolve;
+          rejectScan = reject;
+        });
+
+      let rejection: unknown;
+      const scanPromise = start().catch((error: unknown) => {
+        rejection = error;
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      const scanId =
+        'backScanId' in state ? state.backScanId : 'scanId' in state ? state.scanId : '';
+      expect(await orchestrator.cancelScan(scanId)).toBe(true);
+      expect(orchestrator.getState().status).toBe('idle');
+
+      return { scanId, scanPromise, resolveScan, rejectScan, getRejection: () => rejection };
+    }
+
+    test('a cancelled front scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(orchestrator.getFrontScanResult()).toBeNull();
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect((pending.getRejection() as Error).message).toBe('Scan cancelled by user');
+      await cleanup();
+    });
+
+    test('a cancelled front scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a late rejection of a cancelled scan does not disturb the next scan', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      performScanImpl = async () => realImageBuffer;
+      mockJobUrl = null;
+      await orchestrator.startFrontScan();
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
   });
 
   describe('skipBacks', () => {

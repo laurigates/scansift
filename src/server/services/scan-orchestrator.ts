@@ -82,6 +82,8 @@ const DEFAULT_SCAN_OPTIONS: ScanOptions = {
  */
 const DEFAULT_OUTPUT_DIR = './scanned-photos';
 
+const SCAN_CANCELLED_MESSAGE = 'Scan cancelled by user';
+
 /**
  * Scan Orchestrator Service
  *
@@ -110,6 +112,9 @@ export class ScanOrchestrator extends EventEmitter {
    * dispatch an eSCL DELETE against the active job.
    */
   private activeScans = new Map<string, { jobUrl: string }>();
+  // scanIds cancelled by cancelScan() whose startFrontScan/startBackScan call
+  // has not unwound yet. Entries are removed when that call's catch runs.
+  private cancelledScans = new Set<string>();
 
   constructor(options?: {
     scanTimeout?: number;
@@ -181,6 +186,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Perform scan
       const rawImage = await this.performScan(scanner, mergedOptions, scanId, 'front');
+      this.throwIfCancelled(scanId);
 
       // Save raw scan
       const rawImagePath = await this.saveRawScan(rawImage, scanId, 'front');
@@ -234,6 +240,10 @@ export class ScanOrchestrator extends EventEmitter {
 
       return scanResult;
     } catch (error) {
+      // cancelScan() already reset the state and emitted scan:error
+      if (this.cancelledScans.delete(scanId)) {
+        throw new Error(SCAN_CANCELLED_MESSAGE);
+      }
       this.handleError(scanId, error as Error);
       throw error;
     }
@@ -278,6 +288,7 @@ export class ScanOrchestrator extends EventEmitter {
 
       // Perform scan
       const rawImage = await this.performScan(scanner, mergedOptions, scanId, 'back');
+      this.throwIfCancelled(scanId);
 
       // Save raw scan
       const rawImagePath = await this.saveRawScan(rawImage, scanId, 'back');
@@ -332,6 +343,10 @@ export class ScanOrchestrator extends EventEmitter {
 
       return scanResult;
     } catch (error) {
+      // cancelScan() already reset the state and emitted scan:error
+      if (this.cancelledScans.delete(scanId)) {
+        throw new Error(SCAN_CANCELLED_MESSAGE);
+      }
       this.handleError(scanId, error as Error);
       throw error;
     }
@@ -568,12 +583,23 @@ export class ScanOrchestrator extends EventEmitter {
     this.activeScans.delete(scanId);
 
     // Move back to idle so the UI can start fresh. The in-flight performScan
-    // call will reject on the next scanner interaction and its catch handler
-    // will become a no-op since the state already shows idle.
+    // call settles later (a document, a scanner error or a timeout); marking
+    // the scanId here makes startFrontScan/startBackScan stop at that point
+    // without touching the state or emitting again.
+    this.cancelledScans.add(scanId);
     this.updateState({ status: 'idle' });
-    this.emit('scan:error', scanId, new Error('Scan cancelled by user'));
+    this.emit('scan:error', scanId, new Error(SCAN_CANCELLED_MESSAGE));
 
     return true;
+  }
+
+  /**
+   * Stop a scan whose eSCL call returned a document after cancelScan() ran.
+   */
+  private throwIfCancelled(scanId: string): void {
+    if (this.cancelledScans.has(scanId)) {
+      throw new Error(SCAN_CANCELLED_MESSAGE);
+    }
   }
 
   /**
