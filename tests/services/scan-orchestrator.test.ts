@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
@@ -526,6 +526,103 @@ describe('ScanOrchestrator', () => {
         expect(state.recoverable).toBe(false);
       }
       expect(events.errors[0]?.error).toBeInstanceOf(StorageError);
+      await cleanup();
+    });
+  });
+
+  describe('cropping through the cropper module', () => {
+    test('clamps bounds that overrun the scan instead of failing the scan', async () => {
+      // realImageBuffer is 400x400; this region overruns it by 100px on both axes.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 300, y: 300, width: 200, height: 200 },
+          }),
+        ],
+        processingTime: 1,
+      });
+      const cropsSeenByEnhancer: Buffer[] = [];
+      enhancePhotoImpl = async (buffer) => {
+        cropsSeenByEnhancer.push(buffer);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      const result = await orchestrator.startFrontScan();
+
+      expect(result.photosDetected).toBe(1);
+      expect(cropsSeenByEnhancer).toHaveLength(1);
+      const crop = await sharp(cropsSeenByEnhancer[0]).metadata();
+      expect(crop.width).toBe(100);
+      expect(crop.height).toBe(100);
+      await cleanup();
+    });
+
+    test('still raises ProcessingError when the cropper rejects a region', async () => {
+      // Starting position beyond the 400x400 scan: nothing to clamp to.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 500, y: 500, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      expect(orchestrator.getState().status).toBe('error');
+      await cleanup();
+    });
+  });
+
+  describe('pairing through the pairing module', () => {
+    test('duplicate front positions produce one pair, keeping the first front', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      let enhanceCalls = 0;
+      enhancePhotoImpl = async () => {
+        enhanceCalls += 1;
+        return { buffer: Buffer.from(`enhanced-${enhanceCalls}`) };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(1);
+      const files = await readdir(join(tmp, result.batchId));
+      expect(files).toEqual(['photo-001-top-left-front.jpg']);
+      const saved = await readFile(join(tmp, result.batchId, 'photo-001-top-left-front.jpg'));
+      expect(saved.toString()).toBe('enhanced-1');
+      await cleanup();
+    });
+
+    test('saves pairs in canonical grid order regardless of detection order', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 100, y: 100, width: 100, height: 100 },
+          }),
+          makeDetectedPhoto('top-right', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      const files = (await readdir(join(tmp, result.batchId))).sort();
+      expect(files).toEqual([
+        'photo-001-top-left-front.jpg',
+        'photo-002-top-right-front.jpg',
+        'photo-003-bottom-right-front.jpg',
+      ]);
       await cleanup();
     });
   });
