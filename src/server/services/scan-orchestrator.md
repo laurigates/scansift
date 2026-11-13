@@ -286,17 +286,28 @@ try {
 
 ## Output Structure
 
-Photos are saved with the following structure:
+Photos are organized by the date OCR extracted (the back's date wins over
+the front's). Photos without a date go to `unknown/`:
 
 ```text
 ./scanned-photos/
-  └── {batchId}/
-      ├── photo-001-top-left-front.jpg
-      ├── photo-001-top-left-back.jpg
-      ├── photo-002-top-right-front.jpg
-      ├── photo-002-top-right-back.jpg
-      └── ...
+  ├── raw/                              # unprocessed scans
+  └── processed/
+      ├── 1987/
+      │   └── 06/
+      │       ├── 1987-06-14_001_front.jpg
+      │       ├── 1987-06-14_001_back.jpg
+      │       ├── 1987-06-14_001.json   # sidecar: batch, position, dates, OCR output
+      │       └── ...
+      └── unknown/
+          ├── unknown_001_front.jpg
+          ├── unknown_001.json
+          └── ...
 ```
+
+`NNN` is per date (or per `unknown/`) and continues across batches. Dated
+photos carry the date in the EXIF `DateTimeOriginal` and `DateTime` tags.
+`BatchResult.outputDirectory` is the `processed/` directory.
 
 ## Configuration
 

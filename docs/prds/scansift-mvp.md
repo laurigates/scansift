@@ -50,7 +50,7 @@ fronts by grid position, and OCR-processed to extract date metadata.
 | US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — crop and deskew run on each detected region, but the detector returns the whole scan as one region (#58) |
 | US-2.2 | Automatic contrast / white-balance enhancement | P1 | ✅ Implemented |
 | US-3.1 | OCR date extraction from photo backs | P1 | ❌ Not implemented |
-| US-3.3 | Date-based folder organization, sidecar JSON | P1 | ❌ Not implemented |
+| US-3.3 | Date-based folder organization, sidecar JSON | P1 | ✅ Implemented |
 
 ## Scan Workflow State Machine
 
@@ -122,16 +122,16 @@ Any stage -> ERROR -> retry or skip
 |----|-------------|--------|
 | FR-6.1 | OCR photo backs with Tesseract.js | ❌ Not implemented |
 | FR-6.2 | Parse date patterns (MM/DD/YYYY, Month Year, etc.) | ❌ Not implemented |
-| FR-6.3 | Write extracted date to EXIF tags and sidecar JSON | ❌ Not implemented |
+| FR-6.3 | Write extracted date to EXIF tags and sidecar JSON | ✅ Implemented — EXIF `DateTimeOriginal`/`DateTime` and sidecar `photoDate` (`src/server/processing/organizer.ts`) |
 | FR-6.4 | Preserve all extracted text even when no date is found | ❌ Not implemented |
 
 ### FR-7: File Organization
 
 | ID | Requirement | Status |
 |----|-------------|--------|
-| FR-7.1 | Output structure: `processed/YYYY/MM/YYYY-MM-DD_NNN_front.jpg` | ❌ Not implemented — current output is flat `{batchId}/photo-NNN-{position}-{front\|back}.jpg` |
-| FR-7.2 | Undated photos land in `processed/unknown/` | ❌ Not implemented |
-| FR-7.3 | Sidecar JSON per photo with all metadata | ❌ Not implemented |
+| FR-7.1 | Output structure: `processed/YYYY/MM/YYYY-MM-DD_NNN_front.jpg` | ✅ Implemented — `NNN` is per date and continues across batches |
+| FR-7.2 | Undated photos land in `processed/unknown/` | ✅ Implemented — named `unknown_NNN_{front\|back}.jpg` |
+| FR-7.3 | Sidecar JSON per photo with all metadata | ✅ Implemented — one `.json` per front/back pair |
 | FR-7.4 | SQLite database indexes all scanned photos (Drizzle ORM) | ✅ Implemented — `ScanOrchestrator.completeBatch()` writes `batches`, `photos` and `pairs` rows (`src/server/db/schema.ts`) |
 
 ## Non-Functional Requirements
@@ -227,9 +227,6 @@ requirements still need implementation work.
 - **OCR pipeline (US-3.1, FR-6.1–6.4) is unimplemented.** `tesseract.js` is
   declared in `package.json` but is not imported anywhere under `src/`.
   Photo backs are saved as raw JPEGs with no text extraction.
-- **Date-based output / sidecar JSON (US-3.3, FR-7.1–7.3) are
-  unimplemented.** Output today is a flat per-batch directory:
-  `{outputDirectory}/{batchId}/photo-NNN-{position}-{front|back}.jpg`.
 - **Auto-deskew (FR-5.2) corrects one angle per detected region.**
   `src/server/processing/deskew.ts` estimates a skew of up to ±10° from each
   crop and the orchestrator passes it to `enhancePhoto` as `rotation`. Until the

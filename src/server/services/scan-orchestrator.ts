@@ -36,6 +36,16 @@ import { cropPhoto as defaultCropPhoto } from '../processing/cropper';
 import { estimateSkewAngle as defaultEstimateSkewAngle } from '../processing/deskew';
 import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
+import {
+  buildOutputPaths,
+  buildSidecar,
+  nextSequence,
+  outputDirectoryFor,
+  outputPrefix,
+  PROCESSED_DIR,
+  resolvePhotoDate,
+  writeExifDate,
+} from '../processing/organizer';
 import { pairPhotos } from '../processing/pairing';
 // Import existing modules
 import {
@@ -452,15 +462,15 @@ export class ScanOrchestrator extends EventEmitter {
         }),
       );
 
-      // Create output directory
-      const batchDir = join(this.outputDirectory, batchId);
-      await mkdir(batchDir, { recursive: true });
+      // Photos are organized by extracted date under processed/
+      const batchDir = join(this.outputDirectory, PROCESSED_DIR);
 
-      // Save pairs
+      // Save pairs one at a time: each pair's sequence number is read from
+      // the files already in its target directory.
       let savedCount = 0;
       const savedPaths: SavedPairPaths[] = [];
       for (const pair of photoPairs) {
-        savedPaths.push(await this.savePair(pair, batchDir, savedCount));
+        savedPaths.push(await this.savePair(pair, batchId, this._frontScanResult.timestamp));
         savedCount++;
       }
 
@@ -854,30 +864,39 @@ export class ScanOrchestrator extends EventEmitter {
   }
 
   /**
-   * Save photo pair to filesystem
+   * Save a photo pair and its sidecar JSON to the date-based layout:
+   * processed/YYYY/MM/YYYY-MM-DD_NNN_{front|back}.jpg, or processed/unknown/
+   * when no date was extracted. The extracted date is written to EXIF.
    */
   private async savePair(
     pair: PhotoPair,
-    outputDir: string,
-    index: number,
+    batchId: string,
+    scanTimestamp: Date,
   ): Promise<SavedPairPaths> {
     try {
-      // Generate filename with index and position
-      const baseFilename = `photo-${String(index + 1).padStart(3, '0')}-${pair.position}`;
+      const photoDate = resolvePhotoDate(pair);
+      const directory = outputDirectoryFor(this.outputDirectory, photoDate);
+      await mkdir(directory, { recursive: true });
+
+      const sequence = await nextSequence(directory, outputPrefix(photoDate));
+      const paths = buildOutputPaths(this.outputDirectory, photoDate, sequence);
+      const withDate = (image: Buffer): Promise<Buffer> | Buffer =>
+        photoDate ? writeExifDate(image, photoDate) : image;
 
       // Save front
-      const frontPath = join(outputDir, `${baseFilename}-front.jpg`);
-      await writeFile(frontPath, pair.front.image);
+      await writeFile(paths.frontPath, await withDate(pair.front.image));
 
       // Save back if available
-      const saved: SavedPairPaths = { frontPath };
+      const saved: SavedPairPaths = { frontPath: paths.frontPath };
       if (pair.back) {
-        const backPath = join(outputDir, `${baseFilename}-back.jpg`);
-        await writeFile(backPath, pair.back.image);
-        saved.backPath = backPath;
+        await writeFile(paths.backPath, await withDate(pair.back.image));
+        saved.backPath = paths.backPath;
       }
 
-      logger.debug({ index: index + 1, outputDir }, 'Saved photo pair');
+      const sidecar = buildSidecar(pair, paths, batchId, scanTimestamp);
+      await writeFile(paths.sidecarPath, `${JSON.stringify(sidecar, null, 2)}\n`);
+
+      logger.debug({ sequence, directory }, 'Saved photo pair');
       return saved;
     } catch (error) {
       throw new StorageError(

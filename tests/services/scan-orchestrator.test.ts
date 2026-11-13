@@ -101,6 +101,24 @@ const { ScannerError, DetectionError, ProcessingError, StorageError } = await im
 
 const mockEnhancedBuffer = Buffer.from('mock-enhanced-image');
 
+// Real JPEGs for tests where a date is extracted: writing the EXIF date
+// decodes the image, which the placeholder buffer above cannot survive.
+const makeJpeg = (r: number) =>
+  sharp({ create: { width: 16, height: 16, channels: 3, background: { r, g: 0, b: 0 } } })
+    .jpeg()
+    .toBuffer();
+const jpegA = await makeJpeg(250);
+const jpegB = await makeJpeg(5);
+
+/** Relative paths of every file under {tmp}/processed, sorted. */
+async function listProcessed(tmp: string): Promise<string[]> {
+  const entries = await readdir(join(tmp, 'processed'), { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(join(tmp, 'processed').length + 1))
+    .sort();
+}
+
 function makeDetectedPhoto(
   position: GridPosition,
   overrides?: Partial<DetectedPhoto>,
@@ -452,9 +470,9 @@ describe('ScanOrchestrator', () => {
       expect(result.pairsSaved).toBe(2);
       expect(result.totalPhotos).toBe(2);
 
-      const files = await readdir(join(tmp, result.batchId));
-      const fronts = files.filter((f) => f.includes('-front.jpg'));
-      const backs = files.filter((f) => f.includes('-back.jpg'));
+      const files = await listProcessed(tmp);
+      const fronts = files.filter((f) => f.includes('_front.jpg'));
+      const backs = files.filter((f) => f.includes('_back.jpg'));
       expect(fronts).toHaveLength(2);
       expect(backs).toHaveLength(0);
       expect(events.batchComplete).toHaveLength(1);
@@ -471,9 +489,9 @@ describe('ScanOrchestrator', () => {
       expect(result.pairsSaved).toBe(2);
       expect(result.totalPhotos).toBe(4);
 
-      const files = await readdir(join(tmp, result.batchId));
-      const fronts = files.filter((f) => f.includes('-front.jpg'));
-      const backs = files.filter((f) => f.includes('-back.jpg'));
+      const files = await listProcessed(tmp);
+      const fronts = files.filter((f) => f.includes('_front.jpg'));
+      const backs = files.filter((f) => f.includes('_back.jpg'));
       expect(fronts).toHaveLength(2);
       expect(backs).toHaveLength(2);
       await cleanup();
@@ -571,9 +589,9 @@ describe('ScanOrchestrator', () => {
       for (const row of photoRows) {
         expect(row.batchId).toBe(result.batchId);
         expect(row.frontFilePath.startsWith(result.outputDirectory)).toBe(true);
-        expect(row.frontFilePath.endsWith('-front.jpg')).toBe(true);
+        expect(row.frontFilePath.endsWith('_front.jpg')).toBe(true);
         await access(row.frontFilePath);
-        expect(row.backFilePath?.endsWith('-back.jpg')).toBe(true);
+        expect(row.backFilePath?.endsWith('_back.jpg')).toBe(true);
         await access(row.backFilePath ?? '');
         expect(row.originalFrontPath).toBe(front.rawImagePath);
         expect(row.originalBackPath).toBe(back.rawImagePath);
@@ -612,9 +630,9 @@ describe('ScanOrchestrator', () => {
       // The enhancer stub returns one buffer per call, so tag each side to
       // let the OCR stub tell fronts from backs.
       let side: 'front' | 'back' = 'front';
-      enhancePhotoImpl = async () => ({ buffer: Buffer.from(side) });
+      enhancePhotoImpl = async () => ({ buffer: side === 'back' ? jpegB : jpegA });
       const extractMetadata: OrchestratorDependencies['extractMetadata'] = async (image) =>
-        image.toString() === 'back'
+        image.equals(jpegB)
           ? { extractedText: 'Summer 1985', extractedDate: backDate, confidence: 0.8, words: [] }
           : { extractedText: 'front text', confidence: 0.3, words: [] };
       const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db, extractMetadata } });
@@ -637,6 +655,7 @@ describe('ScanOrchestrator', () => {
     test('falls back to front OCR metadata when there is no back', async () => {
       const db = createDb(':memory:');
       const frontDate = new Date('1990-01-02T00:00:00.000Z');
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
       const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
         extractedText: 'Jan 1990',
         extractedDate: frontDate,
@@ -679,8 +698,8 @@ describe('ScanOrchestrator', () => {
       const result = await orchestrator.completeBatch();
 
       expect(result.pairsSaved).toBe(2);
-      const files = await readdir(join(tmp, result.batchId));
-      expect(files.filter((f) => f.includes('-front.jpg'))).toHaveLength(2);
+      const files = await listProcessed(tmp);
+      expect(files.filter((f) => f.includes('_front.jpg'))).toHaveLength(2);
       expect(events.batchComplete).toHaveLength(1);
       expect(events.errors).toHaveLength(0);
       expect(orchestrator.getState().status).toBe('idle');
@@ -723,6 +742,155 @@ describe('ScanOrchestrator', () => {
       const secondRow = rows.find((r) => r.id === second.batchId);
       expect((secondRow?.startedAt ?? '') > (firstRow?.completedAt ?? 'z')).toBe(true);
       expect(db.select().from(photos).all()).toHaveLength(4);
+      await cleanup();
+    });
+  });
+
+  describe('date-based output', () => {
+    const june14 = new Date(1987, 5, 14, 12, 0, 0);
+    const datedDir = join('1987', '06');
+
+    /** Enhancer stub: top-left becomes jpegA, top-right jpegB, on every scan. */
+    const enhanceByPosition = () => {
+      let calls = 0;
+      enhancePhotoImpl = async () => ({ buffer: calls++ % 2 === 0 ? jpegA : jpegB });
+    };
+
+    test('writes dated pairs under processed/YYYY/MM and undated pairs under processed/unknown, each with a sidecar', async () => {
+      const db = createDb(':memory:');
+      enhanceByPosition();
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async (image) =>
+        image.equals(jpegA)
+          ? { extractedText: 'June 14 1987', extractedDate: june14, confidence: 0.9, words: [] }
+          : { extractedText: 'Grandma', confidence: 0.4, words: [] };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({
+        deps: { db, extractMetadata },
+      });
+
+      const front = await orchestrator.startFrontScan();
+      const result = await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual([
+        join(datedDir, '1987-06-14_001.json'),
+        join(datedDir, '1987-06-14_001_front.jpg'),
+        join('unknown', 'unknown_001.json'),
+        join('unknown', 'unknown_001_front.jpg'),
+      ]);
+      expect(result.outputDirectory).toBe(join(tmp, 'processed'));
+      expect(result.pairsSaved).toBe(2);
+
+      const datedFront = join(tmp, 'processed', datedDir, '1987-06-14_001_front.jpg');
+      const undatedFront = join(tmp, 'processed', 'unknown', 'unknown_001_front.jpg');
+
+      const dated = JSON.parse(
+        await readFile(join(tmp, 'processed', datedDir, '1987-06-14_001.json'), 'utf8'),
+      );
+      expect(dated).toMatchObject({
+        batchId: result.batchId,
+        gridPosition: 'top-left',
+        scanDate: front.timestamp.toISOString(),
+        photoDate: '1987-06-14',
+        front: '1987-06-14_001_front.jpg',
+        back: null,
+      });
+      expect(dated.ocr.front.extractedText).toBe('June 14 1987');
+
+      const undated = JSON.parse(
+        await readFile(join(tmp, 'processed', 'unknown', 'unknown_001.json'), 'utf8'),
+      );
+      expect(undated.photoDate).toBeNull();
+      expect(undated.gridPosition).toBe('top-right');
+      expect(undated.ocr.front.extractedText).toBe('Grandma');
+
+      // The date is written to EXIF only where one was extracted; undated
+      // photos are stored byte-for-byte as enhanced.
+      const exif = (await sharp(datedFront).metadata()).exif;
+      expect(exif?.toString('latin1')).toContain('1987:06:14 12:00:00');
+      expect((await readFile(undatedFront)).equals(jpegB)).toBe(true);
+
+      // The database rows point at the files that were written.
+      const rows = db.select().from(photos).orderBy(photos.id).all();
+      expect(rows.map((row) => row.frontFilePath)).toEqual([datedFront, undatedFront]);
+      expect(db.select().from(batches).all()[0]?.outputDirectory).toBe(join(tmp, 'processed'));
+      await cleanup();
+    });
+
+    test('writes the back next to the front and tags both with the EXIF date', async () => {
+      const db = createDb(':memory:');
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedText: 'June 14 1987',
+        extractedDate: june14,
+        confidence: 0.9,
+        words: [],
+      });
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 5,
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({
+        deps: { db, extractMetadata },
+      });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual([
+        join(datedDir, '1987-06-14_001.json'),
+        join(datedDir, '1987-06-14_001_back.jpg'),
+        join(datedDir, '1987-06-14_001_front.jpg'),
+      ]);
+      const backPath = join(tmp, 'processed', datedDir, '1987-06-14_001_back.jpg');
+      const frontPath = join(tmp, 'processed', datedDir, '1987-06-14_001_front.jpg');
+      for (const path of [frontPath, backPath]) {
+        const exif = (await sharp(path).metadata()).exif;
+        expect(exif?.toString('latin1')).toContain('1987:06:14 12:00:00');
+      }
+      const sidecar = JSON.parse(
+        await readFile(join(tmp, 'processed', datedDir, '1987-06-14_001.json'), 'utf8'),
+      );
+      expect(sidecar.back).toBe('1987-06-14_001_back.jpg');
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.frontFilePath).toBe(frontPath);
+      expect(row?.backFilePath).toBe(backPath);
+      await cleanup();
+    });
+
+    test('continues the sequence within a batch and across batches instead of overwriting', async () => {
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedDate: june14,
+        confidence: 0.9,
+        words: [],
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ deps: { extractMetadata } });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const fronts = (await listProcessed(tmp)).filter((f) => f.endsWith('_front.jpg'));
+      expect(fronts).toEqual([
+        join(datedDir, '1987-06-14_001_front.jpg'),
+        join(datedDir, '1987-06-14_002_front.jpg'),
+        join(datedDir, '1987-06-14_003_front.jpg'),
+        join(datedDir, '1987-06-14_004_front.jpg'),
+      ]);
+      await cleanup();
+    });
+
+    test('continues the unknown sequence across batches', async () => {
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const fronts = (await listProcessed(tmp)).filter((f) => f.endsWith('_front.jpg'));
+      expect(fronts).toEqual([1, 2, 3, 4].map((n) => join('unknown', `unknown_00${n}_front.jpg`)));
       await cleanup();
     });
   });
@@ -859,9 +1027,9 @@ describe('ScanOrchestrator', () => {
       const result = await orchestrator.completeBatch();
 
       expect(result.pairsSaved).toBe(1);
-      const files = await readdir(join(tmp, result.batchId));
-      expect(files).toEqual(['photo-001-top-left-front.jpg']);
-      const saved = await readFile(join(tmp, result.batchId, 'photo-001-top-left-front.jpg'));
+      const images = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
+      expect(images).toEqual([join('unknown', 'unknown_001_front.jpg')]);
+      const saved = await readFile(join(result.outputDirectory, images[0] ?? ''));
       expect(saved.toString()).toBe('enhanced-1');
       await cleanup();
     });
@@ -882,12 +1050,17 @@ describe('ScanOrchestrator', () => {
 
       const result = await orchestrator.completeBatch();
 
-      const files = (await readdir(join(tmp, result.batchId))).sort();
-      expect(files).toEqual([
-        'photo-001-top-left-front.jpg',
-        'photo-002-top-right-front.jpg',
-        'photo-003-bottom-right-front.jpg',
-      ]);
+      // File names carry the sequence number; the sidecar carries the position.
+      const positions = await Promise.all(
+        [1, 2, 3].map(async (n) => {
+          const sidecar = await readFile(
+            join(result.outputDirectory, 'unknown', `unknown_00${n}.json`),
+            'utf8',
+          );
+          return JSON.parse(sidecar).gridPosition;
+        }),
+      );
+      expect(positions).toEqual(['top-left', 'top-right', 'bottom-right']);
       await cleanup();
     });
 
@@ -913,8 +1086,8 @@ describe('ScanOrchestrator', () => {
       const { orchestrator, tmp, cleanup } = await makeOrchestrator();
       await orchestrator.startFrontScan();
       await orchestrator.startBackScan();
-      const result = await orchestrator.completeBatch();
-      const files = (await readdir(join(tmp, result.batchId))).sort();
+      await orchestrator.completeBatch();
+      const files = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
       await cleanup();
       return files;
     }
@@ -922,13 +1095,16 @@ describe('ScanOrchestrator', () => {
     test('pairs a back that shifted 8% into the neighbouring grid cell', async () => {
       const files = await scanShiftedPair({ width: 400, height: 400 });
 
-      expect(files).toEqual(['photo-001-top-left-back.jpg', 'photo-001-top-left-front.jpg']);
+      expect(files).toEqual([
+        join('unknown', 'unknown_001_back.jpg'),
+        join('unknown', 'unknown_001_front.jpg'),
+      ]);
     });
 
     test('pairs by grid position only when the detector reports no dimensions', async () => {
       const files = await scanShiftedPair();
 
-      expect(files).toEqual(['photo-001-top-left-front.jpg']);
+      expect(files).toEqual([join('unknown', 'unknown_001_front.jpg')]);
     });
   });
 
