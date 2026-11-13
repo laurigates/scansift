@@ -232,6 +232,9 @@ export class ScanOrchestrator extends EventEmitter {
         rawImagePath,
         timestamp: new Date(),
         detectedPhotos,
+        ...(detectionResult.imageDimensions && {
+          imageDimensions: detectionResult.imageDimensions,
+        }),
       };
 
       // Store for later pairing
@@ -330,6 +333,9 @@ export class ScanOrchestrator extends EventEmitter {
         rawImagePath,
         timestamp: new Date(),
         detectedPhotos,
+        ...(detectionResult.imageDimensions && {
+          imageDimensions: detectionResult.imageDimensions,
+        }),
       };
 
       // Store for pairing
@@ -369,10 +375,17 @@ export class ScanOrchestrator extends EventEmitter {
       this.updateState({ status: 'saving', batchId });
 
       // Pair photos. pairPhotos logs its own warnings (duplicate positions,
-      // count mismatch, backs without a front).
+      // count mismatch, backs without a front). With the dimensions of both
+      // scans it tolerates a photo shifting between the two passes.
+      const frontDimensions = this._frontScanResult.imageDimensions;
+      const backDimensions = this.backScanResult?.imageDimensions;
       const { pairs } = pairPhotos(
         this._frontScanResult.detectedPhotos.map(toCroppedPhoto),
         (this.backScanResult?.detectedPhotos ?? []).map(toCroppedPhoto),
+        {
+          ...(frontDimensions && { frontDimensions }),
+          ...(backDimensions && { backDimensions }),
+        },
       );
 
       // Enrich pairs with OCR metadata (run in parallel across all photo sides)

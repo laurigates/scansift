@@ -154,6 +154,12 @@ describe('detectPhotos result shape', () => {
     expect(Array.isArray(result.warnings)).toBe(true);
   });
 
+  test('reports the dimensions of the scan the bounds are measured in', async () => {
+    const result = await detectPhotos(singlePhotoScan, TEST_DPI);
+
+    expect(result.imageDimensions).toEqual({ width: SCAN_WIDTH, height: SCAN_HEIGHT });
+  });
+
   test('caps the number of returned regions at four', async () => {
     const result = await detectPhotos(fourPhotoScan, TEST_DPI);
 
