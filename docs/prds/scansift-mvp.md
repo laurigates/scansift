@@ -47,7 +47,7 @@ fronts by grid position, and OCR-processed to extract date metadata.
 | US-1.2 | Trigger scan from mobile phone | P0 | ✅ Implemented |
 | US-1.3 | Scan fronts then backs, auto-pair by position | P0 | ✅ Implemented — position tolerance reaches real scans once the detector segments per photo (see FR-3.2) |
 | US-1.4 | Real-time progress feedback with thumbnails | P0 | ✅ Implemented |
-| US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — auto-crop works, deskew not implemented (see FR-5.2) |
+| US-2.1 | Auto-crop and deskew detected photos | P0 | ⚠️ Partial — crop and deskew run on each detected region, but the detector returns the whole scan as one region (#58) |
 | US-2.2 | Automatic contrast / white-balance enhancement | P1 | ✅ Implemented |
 | US-3.1 | OCR date extraction from photo backs | P1 | ❌ Not implemented |
 | US-3.3 | Date-based folder organization, sidecar JSON | P1 | ❌ Not implemented |
@@ -111,7 +111,7 @@ Any stage -> ERROR -> retry or skip
 | ID | Requirement | Status |
 |----|-------------|--------|
 | FR-5.1 | Crop to detected bounds with 2% margin (Sharp) | ⚠️ Partial — crops to detected bounds; 2% margin not applied |
-| FR-5.2 | Deskew rotation correction | ❌ Not implemented — manual rotation supported in `enhancer.ts`, no auto-deskew |
+| FR-5.2 | Deskew rotation correction | ✅ Implemented — `estimateSkewAngle` in `deskew.ts` (±10°), applied by the orchestrator for estimates of 0.5° or more |
 | FR-5.3 | Auto white-balance and contrast normalization | ✅ Implemented |
 | FR-5.4 | Save as JPEG (quality 95%) with optional PNG archival | ⚠️ Partial — JPEG only; no PNG archival path |
 | FR-5.5 | Preserve original unprocessed scan in `originals/` | ⚠️ Partial — preserved under `raw/` (path drift), not `originals/` |
@@ -231,9 +231,12 @@ requirements still need implementation work.
   unimplemented.** `drizzle-orm` is in `package.json`, but no schema, migrations,
   or DB code exists. Output today is a flat per-batch directory:
   `{outputDirectory}/{batchId}/photo-NNN-{position}-{front|back}.jpg`.
-- **Auto-deskew (FR-5.2) is unimplemented.** `src/server/processing/enhancer.ts`
-  exposes a manual `rotation` option but no rotation-detection logic. This
-  partially undermines US-2.1.
+- **Auto-deskew (FR-5.2) corrects one angle per detected region.**
+  `src/server/processing/deskew.ts` estimates a skew of up to ±10° from each
+  crop and the orchestrator passes it to `enhancePhoto` as `rotation`. Until the
+  detector returns per-photo regions (#58) the crop is the whole scan, so photos
+  lying at different angles on one scan share a single estimate. The estimator
+  has been run on synthetic scans only, not on output from a real scanner.
 - **2% crop margin (FR-5.1) is unimplemented.** `cropPhoto` in
   `src/server/processing/cropper.ts`, which the orchestrator calls for every
   detected photo, extracts the raw detected bounds with no inset/outset margin.

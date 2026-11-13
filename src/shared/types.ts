@@ -128,7 +128,7 @@ export interface EnhancementOptions {
 
 // Applied enhancement details for tracking
 export interface AppliedEnhancement {
-  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'whiteBalance' | 'format';
+  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'crop' | 'whiteBalance' | 'format';
   description: string;
   parameters?: Record<string, number | boolean | string>;
 }

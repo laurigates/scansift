@@ -32,6 +32,7 @@ import { detectPhotos as defaultDetectPhotos } from '../detection/photo-detector
 import { DetectionError, ProcessingError, ScannerError, StorageError } from '../errors';
 import { logger } from '../logger';
 import { cropPhoto as defaultCropPhoto } from '../processing/cropper';
+import { estimateSkewAngle as defaultEstimateSkewAngle } from '../processing/deskew';
 import { enhancePhoto as defaultEnhancePhoto, PRESET_STANDARD } from '../processing/enhancer';
 import { extractMetadata as defaultExtractMetadata } from '../processing/ocr';
 import { pairPhotos } from '../processing/pairing';
@@ -53,6 +54,7 @@ export interface OrchestratorDependencies {
   performScan?: typeof defaultEsclPerformScan;
   detectPhotos?: typeof defaultDetectPhotos;
   cropPhoto?: typeof defaultCropPhoto;
+  estimateSkewAngle?: typeof defaultEstimateSkewAngle;
   enhancePhoto?: typeof defaultEnhancePhoto;
   extractMetadata?: typeof defaultExtractMetadata;
   cancelScanJob?: typeof defaultCancelScanJob;
@@ -87,6 +89,12 @@ const DEFAULT_OUTPUT_DIR = './scanned-photos';
 const SCAN_CANCELLED_MESSAGE = 'Scan cancelled by user';
 
 /**
+ * Smallest estimated skew, in degrees, that is corrected. Rotating resamples
+ * the photo and crops its border, so smaller estimates are left alone.
+ */
+const MIN_DESKEW_DEGREES = 0.5;
+
+/**
  * Present a processed DetectedPhoto in the shape pairPhotos takes.
  */
 const toCroppedPhoto = (photo: DetectedPhoto): CroppedPhoto => ({
@@ -112,6 +120,7 @@ export class ScanOrchestrator extends EventEmitter {
   private esclPerformScan: typeof defaultEsclPerformScan;
   private detectPhotos: typeof defaultDetectPhotos;
   private cropPhoto: typeof defaultCropPhoto;
+  private estimateSkewAngle: typeof defaultEstimateSkewAngle;
   private enhancePhoto: typeof defaultEnhancePhoto;
   private extractMetadata: typeof defaultExtractMetadata;
   private cancelScanJob: typeof defaultCancelScanJob;
@@ -141,6 +150,7 @@ export class ScanOrchestrator extends EventEmitter {
     this.esclPerformScan = options?.deps?.performScan ?? defaultEsclPerformScan;
     this.detectPhotos = options?.deps?.detectPhotos ?? defaultDetectPhotos;
     this.cropPhoto = options?.deps?.cropPhoto ?? defaultCropPhoto;
+    this.estimateSkewAngle = options?.deps?.estimateSkewAngle ?? defaultEstimateSkewAngle;
     this.enhancePhoto = options?.deps?.enhancePhoto ?? defaultEnhancePhoto;
     this.extractMetadata = options?.deps?.extractMetadata ?? defaultExtractMetadata;
     this.cancelScanJob = options?.deps?.cancelScanJob ?? defaultCancelScanJob;
@@ -684,7 +694,7 @@ export class ScanOrchestrator extends EventEmitter {
   }
 
   /**
-   * Crop and enhance detected photos
+   * Crop, deskew and enhance detected photos
    */
   private async cropAndEnhancePhotos(
     rawImage: Buffer,
@@ -700,8 +710,14 @@ export class ScanOrchestrator extends EventEmitter {
         // not used because it drops such photos silently.
         const cropped = await this.cropPhoto(rawImage, photo.bounds);
 
-        // Enhance cropped photo
-        const enhanced = await this.enhancePhoto(cropped, PRESET_STANDARD);
+        // Straighten (FR-5.2) and enhance the cropped photo
+        const skew = await this.estimateSkewAngle(cropped);
+        const enhanced = await this.enhancePhoto(
+          cropped,
+          Math.abs(skew) >= MIN_DESKEW_DEGREES
+            ? { ...PRESET_STANDARD, rotation: skew }
+            : PRESET_STANDARD,
+        );
 
         // Update photo with processed image
         processed.push({
