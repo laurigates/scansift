@@ -1,5 +1,23 @@
 # Changelog
 
+## [0.3.0](https://github.com/laurigates/scansift/compare/scansift-v0.2.0...scansift-v0.3.0) (2026-11-13)
+
+
+### Features
+
+* **orchestrator:** persist batches, photos and pairs to SQLite ([#110](https://github.com/laurigates/scansift/issues/110)) ([d49e410](https://github.com/laurigates/scansift/commit/d49e410e58eabc1cab67b42a8b95d45421e85e1d))
+* **output:** date-based layout, sidecar JSON and EXIF date ([#114](https://github.com/laurigates/scansift/issues/114)) ([0d17ea1](https://github.com/laurigates/scansift/commit/0d17ea15b60fd6675d7dba2bbdba8a6b68acdc23))
+* **output:** optional PNG archival copy ([#117](https://github.com/laurigates/scansift/issues/117)) ([9b1c523](https://github.com/laurigates/scansift/commit/9b1c5239fda95aa24335d2f4dc82f0d9671fd718))
+* **pairing:** pair fronts and backs within 10% position deviation ([#106](https://github.com/laurigates/scansift/issues/106)) ([a6b48d2](https://github.com/laurigates/scansift/commit/a6b48d234e6a066a8350250948425169b1d3f1aa))
+* **processing:** estimate and correct photo skew before saving ([#109](https://github.com/laurigates/scansift/issues/109)) ([561ac8a](https://github.com/laurigates/scansift/commit/561ac8ae766960ae82e45dc687bc65558762be1f))
+
+
+### Bug Fixes
+
+* **client:** bring scan-store in line with its test spec ([#90](https://github.com/laurigates/scansift/issues/90)) ([dd76911](https://github.com/laurigates/scansift/commit/dd76911490895d1cd4de0ebe6d036294427662b1)), closes [#57](https://github.com/laurigates/scansift/issues/57)
+* **detection:** segment multi-photo grid scans into separate regions ([#94](https://github.com/laurigates/scansift/issues/94)) ([524960f](https://github.com/laurigates/scansift/commit/524960f389a6b8b4546ff2184e8d465f9063a1a8)), closes [#58](https://github.com/laurigates/scansift/issues/58)
+* **orchestrator:** stop a cancelled scan from completing or reporting twice ([#91](https://github.com/laurigates/scansift/issues/91)) ([12ec13c](https://github.com/laurigates/scansift/commit/12ec13c607420e822017f368a8df9c1d8ccd94f0))
+
 ## [0.2.0](https://github.com/laurigates/scansift/compare/scansift-v0.1.0...scansift-v0.2.0) (2026-06-06)
 
 
