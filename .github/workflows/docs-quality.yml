@@ -1,23 +1,29 @@
 name: Docs Quality
 
 on:
+  # src/, tests/, scripts/ and package.json are what docs-consistency checks the
+  # docs against, so a change there can break a doc reference.
   pull_request:
     paths:
       - '**/*.md'
       - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
       - 'package.json'
       - '.github/workflows/docs-quality.yml'
       - '.markdownlint.json'
       - '.lycheeignore'
-      - 'scripts/check-docs-consistency.sh'
   push:
     branches: [main]
     paths:
       - '**/*.md'
+      - 'src/**'
+      - 'tests/**'
+      - 'scripts/**'
+      - 'package.json'
       - '.github/workflows/docs-quality.yml'
       - '.markdownlint.json'
       - '.lycheeignore'
-      - 'scripts/check-docs-consistency.sh'
 
 concurrency:
   group: docs-quality-${{ github.ref }}
@@ -68,9 +74,13 @@ jobs:
         run: bash scripts/check-docs-consistency.sh
 
   # Bot PRs (Renovate) never reach Claude: claude-code-action refuses non-human
-  # actors, and a dependency bump does not make docs stale.
+  # actors, and a dependency bump does not make docs stale. The action checks
+  # github.actor, so a bot push to a human PR is skipped as well.
   docs-freshness:
-    if: github.event_name == 'pull_request' && github.event.pull_request.user.type != 'Bot'
+    if: >-
+      github.event_name == 'pull_request'
+      && github.event.pull_request.user.type != 'Bot'
+      && !endsWith(github.actor, '[bot]')
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
