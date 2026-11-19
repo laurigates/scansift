@@ -1,8 +1,10 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test';
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { access, mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import sharp from 'sharp';
+import { batches, createDb, pairs, photos } from '../../src/server/db';
+import type { OrchestratorDependencies } from '../../src/server/services/scan-orchestrator';
 import { PROGRESS_WEIGHTS } from '../../src/shared/constants';
 import type {
   BatchResult,
@@ -44,8 +46,16 @@ let performScanImpl: (
 let detectPhotosImpl: (
   buffer: Buffer,
   dpi: number,
-) => Promise<{ photos: DetectedPhoto[]; processingTime: number; warnings?: string[] }>;
-let enhancePhotoImpl: (buffer: Buffer, options: unknown) => Promise<{ buffer: Buffer }>;
+) => Promise<{
+  photos: DetectedPhoto[];
+  processingTime: number;
+  warnings?: string[];
+  imageDimensions?: { width: number; height: number };
+}>;
+let enhancePhotoImpl: (
+  buffer: Buffer,
+  options: unknown,
+) => Promise<{ buffer: Buffer; archivalBuffer?: Buffer }>;
 
 // Mutable jobUrl that performScan reports to onJobCreated. Tests that
 // exercise cancelScan reach in via setMockJobUrl() to register a known URL.
@@ -94,6 +104,24 @@ const { ScannerError, DetectionError, ProcessingError, StorageError } = await im
 
 const mockEnhancedBuffer = Buffer.from('mock-enhanced-image');
 
+// Real JPEGs for tests where a date is extracted: writing the EXIF date
+// decodes the image, which the placeholder buffer above cannot survive.
+const makeJpeg = (r: number) =>
+  sharp({ create: { width: 16, height: 16, channels: 3, background: { r, g: 0, b: 0 } } })
+    .jpeg()
+    .toBuffer();
+const jpegA = await makeJpeg(250);
+const jpegB = await makeJpeg(5);
+
+/** Relative paths of every file under {tmp}/processed, sorted. */
+async function listProcessed(tmp: string): Promise<string[]> {
+  const entries = await readdir(join(tmp, 'processed'), { recursive: true, withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(join(tmp, 'processed').length + 1))
+    .sort();
+}
+
 function makeDetectedPhoto(
   position: GridPosition,
   overrides?: Partial<DetectedPhoto>,
@@ -133,7 +161,11 @@ function attachListeners(orchestrator: InstanceType<typeof ScanOrchestrator>) {
   return events;
 }
 
-async function makeOrchestrator(opts?: { scanTimeout?: number }) {
+async function makeOrchestrator(opts?: {
+  scanTimeout?: number;
+  archivalPng?: boolean;
+  deps?: OrchestratorDependencies;
+}) {
   const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
   const orchestrator = new ScanOrchestrator({ outputDirectory: tmp, ...opts });
   return { orchestrator, tmp, cleanup: () => rm(tmp, { recursive: true, force: true }) };
@@ -445,9 +477,9 @@ describe('ScanOrchestrator', () => {
       expect(result.pairsSaved).toBe(2);
       expect(result.totalPhotos).toBe(2);
 
-      const files = await readdir(join(tmp, result.batchId));
-      const fronts = files.filter((f) => f.includes('-front.jpg'));
-      const backs = files.filter((f) => f.includes('-back.jpg'));
+      const files = await listProcessed(tmp);
+      const fronts = files.filter((f) => f.includes('_front.jpg'));
+      const backs = files.filter((f) => f.includes('_back.jpg'));
       expect(fronts).toHaveLength(2);
       expect(backs).toHaveLength(0);
       expect(events.batchComplete).toHaveLength(1);
@@ -464,9 +496,9 @@ describe('ScanOrchestrator', () => {
       expect(result.pairsSaved).toBe(2);
       expect(result.totalPhotos).toBe(4);
 
-      const files = await readdir(join(tmp, result.batchId));
-      const fronts = files.filter((f) => f.includes('-front.jpg'));
-      const backs = files.filter((f) => f.includes('-back.jpg'));
+      const files = await listProcessed(tmp);
+      const fronts = files.filter((f) => f.includes('_front.jpg'));
+      const backs = files.filter((f) => f.includes('_back.jpg'));
       expect(fronts).toHaveLength(2);
       expect(backs).toHaveLength(2);
       await cleanup();
@@ -527,6 +559,664 @@ describe('ScanOrchestrator', () => {
       }
       expect(events.errors[0]?.error).toBeInstanceOf(StorageError);
       await cleanup();
+    });
+  });
+
+  describe('persistence', () => {
+    test('front + back batch writes one batches row, one photos row and one pairs row per pair', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      // Delay the scan so "captured at front-scan start" is distinguishable
+      // from the ScanResult timestamp, which is set after detection.
+      performScanImpl = async () => {
+        await new Promise((r) => setTimeout(r, 20));
+        return realImageBuffer;
+      };
+
+      const beforeFront = new Date().toISOString();
+      const front = await orchestrator.startFrontScan();
+      const back = await orchestrator.startBackScan();
+      const result = await orchestrator.completeBatch();
+
+      const batchRows = db.select().from(batches).all();
+      expect(batchRows).toHaveLength(1);
+      const batch = batchRows[0];
+      expect(batch?.id).toBe(result.batchId);
+      expect(batch?.status).toBe('complete');
+      expect(batch?.outputDirectory).toBe(result.outputDirectory);
+      expect(batch?.completedAt).toBeTruthy();
+      // ISO-8601 UTC strings compare lexicographically in time order.
+      expect((batch?.startedAt ?? '') >= beforeFront).toBe(true);
+      expect((batch?.startedAt ?? 'z') < front.timestamp.toISOString()).toBe(true);
+      expect((batch?.startedAt ?? 'z') <= (batch?.completedAt ?? '')).toBe(true);
+
+      const photoRows = db.select().from(photos).orderBy(photos.id).all();
+      expect(photoRows).toHaveLength(2);
+      expect(photoRows.map((p) => p.gridPosition)).toEqual(['top-left', 'top-right']);
+      for (const row of photoRows) {
+        expect(row.batchId).toBe(result.batchId);
+        expect(row.frontFilePath.startsWith(result.outputDirectory)).toBe(true);
+        expect(row.frontFilePath.endsWith('_front.jpg')).toBe(true);
+        await access(row.frontFilePath);
+        expect(row.backFilePath?.endsWith('_back.jpg')).toBe(true);
+        await access(row.backFilePath ?? '');
+        expect(row.originalFrontPath).toBe(front.rawImagePath);
+        expect(row.originalBackPath).toBe(back.rawImagePath);
+        expect(row.scanDate).toBe(front.timestamp.toISOString());
+      }
+
+      const pairRows = db.select().from(pairs).orderBy(pairs.id).all();
+      expect(pairRows).toHaveLength(2);
+      expect(pairRows.map((p) => p.frontPhotoId)).toEqual(photoRows.map((p) => p.id));
+      for (const row of pairRows) {
+        expect(row.batchId).toBe(result.batchId);
+        expect(row.backPhotoId).toBeNull();
+      }
+      await cleanup();
+    });
+
+    test('front-only batch leaves back_file_path and original_back_path null', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const photoRows = db.select().from(photos).all();
+      expect(photoRows).toHaveLength(2);
+      for (const row of photoRows) {
+        expect(row.backFilePath).toBeNull();
+        expect(row.originalBackPath).toBeNull();
+      }
+      expect(db.select().from(pairs).all()).toHaveLength(2);
+      await cleanup();
+    });
+
+    test('maps OCR metadata to photo_date, extracted_text and confidence_score, preferring the back', async () => {
+      const db = createDb(':memory:');
+      const backDate = new Date('1985-07-20T00:00:00.000Z');
+      // The enhancer stub returns one buffer per call, so tag each side to
+      // let the OCR stub tell fronts from backs.
+      let side: 'front' | 'back' = 'front';
+      enhancePhotoImpl = async () => ({ buffer: side === 'back' ? jpegB : jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async (image) =>
+        image.equals(jpegB)
+          ? { extractedText: 'Summer 1985', extractedDate: backDate, confidence: 0.8, words: [] }
+          : { extractedText: 'front text', confidence: 0.3, words: [] };
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db, extractMetadata } });
+
+      await orchestrator.startFrontScan();
+      side = 'back';
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      const photoRows = db.select().from(photos).all();
+      expect(photoRows).toHaveLength(2);
+      for (const row of photoRows) {
+        expect(row.photoDate).toBe(backDate.toISOString());
+        expect(row.extractedText).toBe('Summer 1985');
+        expect(row.confidenceScore).toBeCloseTo(0.8);
+      }
+      await cleanup();
+    });
+
+    test('falls back to front OCR metadata when there is no back', async () => {
+      const db = createDb(':memory:');
+      const frontDate = new Date('1990-01-02T00:00:00.000Z');
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedText: 'Jan 1990',
+        extractedDate: frontDate,
+        confidence: 0.6,
+        words: [],
+      });
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db, extractMetadata } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.photoDate).toBe(frontDate.toISOString());
+      expect(row?.extractedText).toBe('Jan 1990');
+      expect(row?.confidenceScore).toBeCloseTo(0.6);
+      await cleanup();
+    });
+
+    test('stores detection confidence and null text/date when OCR finds no text', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.photoDate).toBeNull();
+      expect(row?.extractedText).toBeNull();
+      // makeDetectedPhoto sets detection confidence to 0.95
+      expect(row?.confidenceScore).toBeCloseTo(0.95);
+      await cleanup();
+    });
+
+    test('a failing database write does not abort the batch', async () => {
+      const db = createDb(':memory:');
+      // Every statement against a closed connection throws.
+      db.$client.close();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ deps: { db } });
+      const events = attachListeners(orchestrator);
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(2);
+      const files = await listProcessed(tmp);
+      expect(files.filter((f) => f.includes('_front.jpg'))).toHaveLength(2);
+      expect(events.batchComplete).toHaveLength(1);
+      expect(events.errors).toHaveLength(0);
+      expect(orchestrator.getState().status).toBe('idle');
+      await cleanup();
+    });
+
+    test('a write that fails part-way leaves no rows behind', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      // The batches row is inserted before the photos rows; a NOT NULL
+      // violation on photos.original_front_path must roll it back.
+      const frontResult = orchestrator.getFrontScanResult();
+      if (frontResult) {
+        // biome-ignore lint/suspicious/noExplicitAny: force a NOT NULL violation on original_front_path
+        (frontResult as any).rawImagePath = null;
+      }
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(2);
+      expect(db.select().from(batches).all()).toHaveLength(0);
+      expect(db.select().from(photos).all()).toHaveLength(0);
+      expect(db.select().from(pairs).all()).toHaveLength(0);
+      await cleanup();
+    });
+
+    test('a second batch records its own started_at', async () => {
+      const db = createDb(':memory:');
+      const { orchestrator, cleanup } = await makeOrchestrator({ deps: { db } });
+      await orchestrator.startFrontScan();
+      const first = await orchestrator.completeBatch();
+      await new Promise((r) => setTimeout(r, 5));
+      await orchestrator.startFrontScan();
+      const second = await orchestrator.completeBatch();
+
+      const rows = db.select().from(batches).all();
+      expect(rows).toHaveLength(2);
+      const firstRow = rows.find((r) => r.id === first.batchId);
+      const secondRow = rows.find((r) => r.id === second.batchId);
+      expect((secondRow?.startedAt ?? '') > (firstRow?.completedAt ?? 'z')).toBe(true);
+      expect(db.select().from(photos).all()).toHaveLength(4);
+      await cleanup();
+    });
+  });
+
+  describe('date-based output', () => {
+    const june14 = new Date(1987, 5, 14, 12, 0, 0);
+    const datedDir = join('1987', '06');
+
+    /** Enhancer stub: top-left becomes jpegA, top-right jpegB, on every scan. */
+    const enhanceByPosition = () => {
+      let calls = 0;
+      enhancePhotoImpl = async () => ({ buffer: calls++ % 2 === 0 ? jpegA : jpegB });
+    };
+
+    test('writes dated pairs under processed/YYYY/MM and undated pairs under processed/unknown, each with a sidecar', async () => {
+      const db = createDb(':memory:');
+      enhanceByPosition();
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async (image) =>
+        image.equals(jpegA)
+          ? { extractedText: 'June 14 1987', extractedDate: june14, confidence: 0.9, words: [] }
+          : { extractedText: 'Grandma', confidence: 0.4, words: [] };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({
+        deps: { db, extractMetadata },
+      });
+
+      const front = await orchestrator.startFrontScan();
+      const result = await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual([
+        join(datedDir, '1987-06-14_001.json'),
+        join(datedDir, '1987-06-14_001_front.jpg'),
+        join('unknown', 'unknown_001.json'),
+        join('unknown', 'unknown_001_front.jpg'),
+      ]);
+      expect(result.outputDirectory).toBe(join(tmp, 'processed'));
+      expect(result.pairsSaved).toBe(2);
+
+      const datedFront = join(tmp, 'processed', datedDir, '1987-06-14_001_front.jpg');
+      const undatedFront = join(tmp, 'processed', 'unknown', 'unknown_001_front.jpg');
+
+      const dated = JSON.parse(
+        await readFile(join(tmp, 'processed', datedDir, '1987-06-14_001.json'), 'utf8'),
+      );
+      expect(dated).toMatchObject({
+        batchId: result.batchId,
+        gridPosition: 'top-left',
+        scanDate: front.timestamp.toISOString(),
+        photoDate: '1987-06-14',
+        front: '1987-06-14_001_front.jpg',
+        back: null,
+      });
+      expect(dated.ocr.front.extractedText).toBe('June 14 1987');
+
+      const undated = JSON.parse(
+        await readFile(join(tmp, 'processed', 'unknown', 'unknown_001.json'), 'utf8'),
+      );
+      expect(undated.photoDate).toBeNull();
+      expect(undated.gridPosition).toBe('top-right');
+      expect(undated.ocr.front.extractedText).toBe('Grandma');
+
+      // The date is written to EXIF only where one was extracted; undated
+      // photos are stored byte-for-byte as enhanced.
+      const exif = (await sharp(datedFront).metadata()).exif;
+      expect(exif?.toString('latin1')).toContain('1987:06:14 12:00:00');
+      expect((await readFile(undatedFront)).equals(jpegB)).toBe(true);
+
+      // The database rows point at the files that were written.
+      const rows = db.select().from(photos).orderBy(photos.id).all();
+      expect(rows.map((row) => row.frontFilePath)).toEqual([datedFront, undatedFront]);
+      expect(db.select().from(batches).all()[0]?.outputDirectory).toBe(join(tmp, 'processed'));
+      await cleanup();
+    });
+
+    test('writes the back next to the front and tags both with the EXIF date', async () => {
+      const db = createDb(':memory:');
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedText: 'June 14 1987',
+        extractedDate: june14,
+        confidence: 0.9,
+        words: [],
+      });
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 5,
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({
+        deps: { db, extractMetadata },
+      });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual([
+        join(datedDir, '1987-06-14_001.json'),
+        join(datedDir, '1987-06-14_001_back.jpg'),
+        join(datedDir, '1987-06-14_001_front.jpg'),
+      ]);
+      const backPath = join(tmp, 'processed', datedDir, '1987-06-14_001_back.jpg');
+      const frontPath = join(tmp, 'processed', datedDir, '1987-06-14_001_front.jpg');
+      for (const path of [frontPath, backPath]) {
+        const exif = (await sharp(path).metadata()).exif;
+        expect(exif?.toString('latin1')).toContain('1987:06:14 12:00:00');
+      }
+      const sidecar = JSON.parse(
+        await readFile(join(tmp, 'processed', datedDir, '1987-06-14_001.json'), 'utf8'),
+      );
+      expect(sidecar.back).toBe('1987-06-14_001_back.jpg');
+
+      const [row] = db.select().from(photos).all();
+      expect(row?.frontFilePath).toBe(frontPath);
+      expect(row?.backFilePath).toBe(backPath);
+      await cleanup();
+    });
+
+    test('continues the sequence within a batch and across batches instead of overwriting', async () => {
+      enhancePhotoImpl = async () => ({ buffer: jpegA });
+      const extractMetadata: OrchestratorDependencies['extractMetadata'] = async () => ({
+        extractedDate: june14,
+        confidence: 0.9,
+        words: [],
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ deps: { extractMetadata } });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const fronts = (await listProcessed(tmp)).filter((f) => f.endsWith('_front.jpg'));
+      expect(fronts).toEqual([
+        join(datedDir, '1987-06-14_001_front.jpg'),
+        join(datedDir, '1987-06-14_002_front.jpg'),
+        join(datedDir, '1987-06-14_003_front.jpg'),
+        join(datedDir, '1987-06-14_004_front.jpg'),
+      ]);
+      await cleanup();
+    });
+
+    test('continues the unknown sequence across batches', async () => {
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const fronts = (await listProcessed(tmp)).filter((f) => f.endsWith('_front.jpg'));
+      expect(fronts).toEqual([1, 2, 3, 4].map((n) => join('unknown', `unknown_00${n}_front.jpg`)));
+      await cleanup();
+    });
+  });
+
+  describe('PNG archival copy', () => {
+    const pngOf = (label: string) => Buffer.from(`archival-png-${label}`);
+
+    /**
+     * Enhancer stub that honours the archivalPng option the way the real
+     * enhancer does, and records the options of every call. Each call gets
+     * its own PNG so a mixed-up front/back is visible.
+     */
+    const enhanceWithArchival = () => {
+      const seenOptions: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        seenOptions.push(options);
+        const wantsPng = (options as { archivalPng?: boolean }).archivalPng === true;
+        return {
+          buffer: mockEnhancedBuffer,
+          ...(wantsPng && { archivalBuffer: pngOf(String(seenOptions.length)) }),
+        };
+      };
+      return seenOptions;
+    };
+
+    test('writes one PNG beside each JPEG when the option is on', async () => {
+      const seenOptions = enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      expect(await listProcessed(tmp)).toEqual(
+        [
+          'unknown_001.json',
+          'unknown_001_back.jpg',
+          'unknown_001_back.png',
+          'unknown_001_front.jpg',
+          'unknown_001_front.png',
+          'unknown_002.json',
+          'unknown_002_back.jpg',
+          'unknown_002_back.png',
+          'unknown_002_front.jpg',
+          'unknown_002_front.png',
+        ].map((name) => join('unknown', name)),
+      );
+      expect(seenOptions).toHaveLength(4);
+      for (const options of seenOptions) {
+        expect(options).toMatchObject({ normalize: true, sharpen: true, archivalPng: true });
+      }
+
+      // Calls 1-2 are the fronts (top-left, top-right), 3-4 the backs.
+      const read = (name: string) => readFile(join(tmp, 'processed', 'unknown', name));
+      expect((await read('unknown_001_front.png')).equals(pngOf('1'))).toBe(true);
+      expect((await read('unknown_002_front.png')).equals(pngOf('2'))).toBe(true);
+      expect((await read('unknown_001_back.png')).equals(pngOf('3'))).toBe(true);
+      expect((await read('unknown_002_back.png')).equals(pngOf('4'))).toBe(true);
+      expect((await read('unknown_001_front.jpg')).equals(mockEnhancedBuffer)).toBe(true);
+      await cleanup();
+    });
+
+    test('writes no back PNG for a front-only pair', async () => {
+      enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const pngs = (await listProcessed(tmp)).filter((f) => f.endsWith('.png'));
+      expect(pngs).toEqual(
+        ['unknown_001_front.png', 'unknown_002_front.png'].map((name) => join('unknown', name)),
+      );
+      await cleanup();
+    });
+
+    test('writes no PNG and does not ask the enhancer for one by default', async () => {
+      const seenOptions = enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+
+      const files = await listProcessed(tmp);
+      expect(files.filter((f) => f.endsWith('.png'))).toEqual([]);
+      expect(files.filter((f) => f.endsWith('.jpg'))).toHaveLength(4);
+      expect(seenOptions).toHaveLength(4);
+      for (const options of seenOptions) {
+        expect(options).not.toHaveProperty('archivalPng');
+      }
+      await cleanup();
+    });
+
+    test('the next batch continues the sequence past files that have a PNG', async () => {
+      enhanceWithArchival();
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator({ archivalPng: true });
+
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+      await orchestrator.startFrontScan();
+      await orchestrator.completeBatch();
+
+      const pngs = (await listProcessed(tmp)).filter((f) => f.endsWith('.png'));
+      expect(pngs).toEqual([1, 2, 3, 4].map((n) => join('unknown', `unknown_00${n}_front.png`)));
+      await cleanup();
+    });
+  });
+
+  describe('cropping through the cropper module', () => {
+    test('clamps bounds that overrun the scan instead of failing the scan', async () => {
+      // realImageBuffer is 400x400; this region overruns it by 100px on both axes.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 300, y: 300, width: 200, height: 200 },
+          }),
+        ],
+        processingTime: 1,
+      });
+      const cropsSeenByEnhancer: Buffer[] = [];
+      enhancePhotoImpl = async (buffer) => {
+        cropsSeenByEnhancer.push(buffer);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      const result = await orchestrator.startFrontScan();
+
+      expect(result.photosDetected).toBe(1);
+      expect(cropsSeenByEnhancer).toHaveLength(1);
+      const crop = await sharp(cropsSeenByEnhancer[0]).metadata();
+      expect(crop.width).toBe(100);
+      expect(crop.height).toBe(100);
+      await cleanup();
+    });
+
+    test('passes the estimated skew angle to the enhancer as a rotation', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const cropsSeenByEstimator: Buffer[] = [];
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async (crop: Buffer) => {
+            cropsSeenByEstimator.push(crop);
+            return 4;
+          },
+        },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true, rotation: 4 }]);
+      // The estimator sees the 100x100 crop, not the 400x400 scan.
+      expect(cropsSeenByEstimator).toHaveLength(1);
+      expect((await sharp(cropsSeenByEstimator[0]).metadata()).width).toBe(100);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('passes no rotation when the estimated skew is inside the dead zone', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [makeDetectedPhoto('top-left')],
+        processingTime: 1,
+      });
+      const optionsSeenByEnhancer: unknown[] = [];
+      enhancePhotoImpl = async (_buffer, options) => {
+        optionsSeenByEnhancer.push(options);
+        return { buffer: mockEnhancedBuffer };
+      };
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: { estimateSkewAngle: async () => -0.2 },
+      });
+
+      await orchestrator.startFrontScan();
+
+      expect(optionsSeenByEnhancer).toEqual([{ normalize: true, sharpen: true }]);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('raises ProcessingError when skew estimation fails', async () => {
+      const tmp = await mkdtemp(join(tmpdir(), 'scansift-orch-'));
+      const orchestrator = new ScanOrchestrator({
+        outputDirectory: tmp,
+        deps: {
+          estimateSkewAngle: async () => {
+            throw new Error('estimator failed');
+          },
+        },
+      });
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      await rm(tmp, { recursive: true, force: true });
+    });
+
+    test('still raises ProcessingError when the cropper rejects a region', async () => {
+      // Starting position beyond the 400x400 scan: nothing to clamp to.
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 500, y: 500, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, cleanup } = await makeOrchestrator();
+
+      await expect(orchestrator.startFrontScan()).rejects.toBeInstanceOf(ProcessingError);
+      expect(orchestrator.getState().status).toBe('error');
+      await cleanup();
+    });
+  });
+
+  describe('pairing through the pairing module', () => {
+    test('duplicate front positions produce one pair, keeping the first front', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      let enhanceCalls = 0;
+      enhancePhotoImpl = async () => {
+        enhanceCalls += 1;
+        return { buffer: Buffer.from(`enhanced-${enhanceCalls}`) };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      expect(result.pairsSaved).toBe(1);
+      const images = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
+      expect(images).toEqual([join('unknown', 'unknown_001_front.jpg')]);
+      const saved = await readFile(join(result.outputDirectory, images[0] ?? ''));
+      expect(saved.toString()).toBe('enhanced-1');
+      await cleanup();
+    });
+
+    test('saves pairs in canonical grid order regardless of detection order', async () => {
+      detectPhotosImpl = async () => ({
+        photos: [
+          makeDetectedPhoto('bottom-right', {
+            bounds: { x: 100, y: 100, width: 100, height: 100 },
+          }),
+          makeDetectedPhoto('top-right', { bounds: { x: 100, y: 0, width: 100, height: 100 } }),
+          makeDetectedPhoto('top-left', { bounds: { x: 0, y: 0, width: 100, height: 100 } }),
+        ],
+        processingTime: 1,
+      });
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+
+      const result = await orchestrator.completeBatch();
+
+      // File names carry the sequence number; the sidecar carries the position.
+      const positions = await Promise.all(
+        [1, 2, 3].map(async (n) => {
+          const sidecar = await readFile(
+            join(result.outputDirectory, 'unknown', `unknown_00${n}.json`),
+            'utf8',
+          );
+          return JSON.parse(sidecar).gridPosition;
+        }),
+      );
+      expect(positions).toEqual(['top-left', 'top-right', 'bottom-right']);
+      await cleanup();
+    });
+
+    // realImageBuffer is 400x400. The front's centre is (180, 100), top-left;
+    // the back's is (212, 100), top-right: an 8% shift over the midline.
+    const shiftedFront = makeDetectedPhoto('top-left', {
+      bounds: { x: 130, y: 50, width: 100, height: 100 },
+    });
+    const shiftedBack = makeDetectedPhoto('top-right', {
+      bounds: { x: 162, y: 50, width: 100, height: 100 },
+    });
+
+    async function scanShiftedPair(imageDimensions?: { width: number; height: number }) {
+      let detections = 0;
+      detectPhotosImpl = async () => {
+        detections += 1;
+        return {
+          photos: [detections === 1 ? shiftedFront : shiftedBack],
+          processingTime: 1,
+          ...(imageDimensions && { imageDimensions }),
+        };
+      };
+      const { orchestrator, tmp, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      await orchestrator.startBackScan();
+      await orchestrator.completeBatch();
+      const files = (await listProcessed(tmp)).filter((f) => f.endsWith('.jpg'));
+      await cleanup();
+      return files;
+    }
+
+    test('pairs a back that shifted 8% into the neighbouring grid cell', async () => {
+      const files = await scanShiftedPair({ width: 400, height: 400 });
+
+      expect(files).toEqual([
+        join('unknown', 'unknown_001_back.jpg'),
+        join('unknown', 'unknown_001_front.jpg'),
+      ]);
+    });
+
+    test('pairs by grid position only when the detector reports no dimensions', async () => {
+      const files = await scanShiftedPair();
+
+      expect(files).toEqual([join('unknown', 'unknown_001_front.jpg')]);
     });
   });
 
@@ -724,6 +1414,187 @@ describe('ScanOrchestrator', () => {
       // Release the still-pending performScan so its catch doesn't leak
       resolveScan(realImageBuffer);
       await scanPromise;
+      await cleanup();
+    });
+
+    // Starts a scan whose eSCL call stays pending, cancels it, and hands back
+    // the controls for settling that call afterwards.
+    async function cancelPendingScan(
+      orchestrator: InstanceType<typeof ScanOrchestrator>,
+      start: () => Promise<unknown>,
+    ) {
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+      let resolveScan: (buf: Buffer) => void = () => undefined;
+      let rejectScan: (error: Error) => void = () => undefined;
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve, reject) => {
+          resolveScan = resolve;
+          rejectScan = reject;
+        });
+
+      let rejection: unknown;
+      const scanPromise = start().catch((error: unknown) => {
+        rejection = error;
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      const scanId =
+        'backScanId' in state ? state.backScanId : 'scanId' in state ? state.scanId : '';
+      expect(await orchestrator.cancelScan(scanId)).toBe(true);
+      expect(orchestrator.getState().status).toBe('idle');
+
+      return { scanId, scanPromise, resolveScan, rejectScan, getRejection: () => rejection };
+    }
+
+    test('a cancelled front scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(orchestrator.getFrontScanResult()).toBeNull();
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect((pending.getRejection() as Error).message).toBe('Scan cancelled by user');
+      await cleanup();
+    });
+
+    test('a cancelled front scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a late rejection of a cancelled scan does not disturb the next scan', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startFrontScan());
+
+      performScanImpl = async () => realImageBuffer;
+      mockJobUrl = null;
+      await orchestrator.startFrontScan();
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState().status).toBe('ready_for_backs');
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner still returns a document', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.resolveScan(realImageBuffer);
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.complete).toHaveLength(0);
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    test('a cancelled back scan stays idle when the scanner call later rejects', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      await orchestrator.startFrontScan();
+      const events = attachListeners(orchestrator);
+      const pending = await cancelPendingScan(orchestrator, () => orchestrator.startBackScan());
+
+      pending.rejectScan(new ScannerError('Scan timed out waiting for scanner'));
+      await pending.scanPromise;
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      await cleanup();
+    });
+
+    // Starts a front scan whose eSCL call stays pending, then cancels it with a
+    // cancelScanJob mock that settles that call while the DELETE is still awaited.
+    async function cancelWithScanSettlingDuringDelete(
+      orchestrator: InstanceType<typeof ScanOrchestrator>,
+      settle: (controls: {
+        resolveScan: (buf: Buffer) => void;
+        rejectScan: (error: Error) => void;
+      }) => void,
+    ) {
+      mockJobUrl = 'http://mock-scanner/eSCL/ScanJobs/job-42';
+      const controls = {
+        resolveScan: (_buf: Buffer): void => undefined,
+        rejectScan: (_error: Error): void => undefined,
+      };
+      performScanImpl = (_scanner, _options, _timeoutMs, _progressCallback) =>
+        new Promise<Buffer>((resolve, reject) => {
+          controls.resolveScan = resolve;
+          controls.rejectScan = reject;
+        });
+      cancelScanJobImpl.mockImplementationOnce(async () => {
+        settle(controls);
+        await new Promise((r) => setTimeout(r, 5));
+        return undefined;
+      });
+
+      let rejection: unknown;
+      const scanPromise = orchestrator.startFrontScan().catch((error: unknown) => {
+        rejection = error;
+      });
+      await new Promise((r) => setTimeout(r, 5));
+      const state = orchestrator.getState();
+      const scanId = 'scanId' in state ? state.scanId : '';
+      expect(await orchestrator.cancelScan(scanId)).toBe(true);
+      await scanPromise;
+
+      const cancelledScans = (orchestrator as unknown as { cancelledScans: Set<string> })
+        .cancelledScans;
+      return { rejection: rejection as Error, cancelledScans };
+    }
+
+    test('a scan that rejects while the eSCL DELETE is in flight reports the cancel once', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+
+      const { rejection, cancelledScans } = await cancelWithScanSettlingDuringDelete(
+        orchestrator,
+        ({ rejectScan }) => rejectScan(new ScannerError('Scan job not found (404)')),
+      );
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect(events.stateChanged.map((s) => s.status)).not.toContain('error');
+      expect(rejection.message).toBe('Scan cancelled by user');
+      expect(cancelledScans.size).toBe(0);
+      await cleanup();
+    });
+
+    test('a document that arrives while the eSCL DELETE is in flight is discarded', async () => {
+      const { orchestrator, cleanup } = await makeOrchestrator();
+      const events = attachListeners(orchestrator);
+
+      const { rejection, cancelledScans } = await cancelWithScanSettlingDuringDelete(
+        orchestrator,
+        ({ resolveScan }) => resolveScan(realImageBuffer),
+      );
+
+      expect(orchestrator.getState()).toEqual({ status: 'idle' });
+      expect(orchestrator.getFrontScanResult()).toBeNull();
+      expect(events.complete).toHaveLength(0);
+      expect(events.stateChanged.map((s) => s.status)).not.toContain('ready_for_backs');
+      expect(events.errors.map((e) => e.error.message)).toEqual(['Scan cancelled by user']);
+      expect(rejection.message).toBe('Scan cancelled by user');
+      expect(cancelledScans.size).toBe(0);
       await cleanup();
     });
   });
