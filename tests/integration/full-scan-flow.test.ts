@@ -101,6 +101,8 @@ let baseUrl: string;
 const startApp = async (): Promise<{ app: App; baseUrl: string }> => {
   // Force the orchestrator to write into an isolated tmpdir.
   process.env.OUTPUT_DIR = outputDir;
+  // Keep batch rows out of ./scansift.db in the working directory.
+  process.env.DB_PATH = ':memory:';
   const instance = await createApp();
   await instance.listen({ port: 0, host: '127.0.0.1' });
   const addr = instance.server.address() as AddressInfo;
@@ -221,6 +223,14 @@ describe('full scan flow integration', () => {
 
       const batchEvent = await batchCompletePromise;
       expect(batchEvent.photos).toBe(4);
+
+      // The batch is persisted, so the stats route reads it back: one photos
+      // row per saved pair, all from a batch started after server boot.
+      const statsRes = await get('/api/stats');
+      expect(statsRes.status).toBe(200);
+      const stats = (await statsRes.json()) as { totalPhotos: number; sessionPhotos: number };
+      expect(stats.totalPhotos).toBe(batch.pairsSaved);
+      expect(stats.sessionPhotos).toBe(batch.pairsSaved);
     } finally {
       socket.disconnect();
     }
