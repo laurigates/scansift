@@ -7,6 +7,7 @@ import { beforeAll, describe, expect, test } from 'bun:test';
 import sharp from 'sharp';
 import {
   enhancePhoto,
+  inscribedRectangle,
   PRESET_LIGHT,
   PRESET_STANDARD,
   PRESET_VINTAGE,
@@ -200,6 +201,92 @@ describe('enhancePhoto', () => {
 
     await expect(enhancePhoto(emptyBuffer)).rejects.toThrow();
   });
+
+  describe('arbitrary-angle rotation', () => {
+    // A solid mid-grey 600x400 image: any white in the output comes from the
+    // background sharp fills the rotated frame with.
+    const solidGrey = () =>
+      sharp({
+        create: { width: 600, height: 400, channels: 3, background: { r: 90, g: 90, b: 90 } },
+      })
+        .png()
+        .toBuffer();
+
+    const cornerPixels = async (buffer: Buffer) => {
+      const { data, info } = await sharp(buffer).raw().toBuffer({ resolveWithObject: true });
+      const at = (x: number, y: number) => data[(y * info.width + x) * info.channels] ?? -1;
+      return [
+        at(0, 0),
+        at(info.width - 1, 0),
+        at(0, info.height - 1),
+        at(info.width - 1, info.height - 1),
+      ];
+    };
+
+    for (const degrees of [5, -5, 0.7, -9.3]) {
+      test(`leaves no background wedges after rotating by ${degrees} degrees`, async () => {
+        const result = await enhancePhoto(await solidGrey(), { rotation: degrees });
+
+        for (const value of await cornerPixels(result.buffer)) {
+          expect(Math.abs(value - 90)).toBeLessThanOrEqual(6);
+        }
+      });
+    }
+
+    test('crops to the rectangle inscribed in the rotated frame', async () => {
+      const result = await enhancePhoto(await solidGrey(), { rotation: 5 });
+
+      // Inscribed rectangle of 600x400 at 5 degrees is 571.5 x 351.5.
+      expect(result.dimensions.width).toBeLessThanOrEqual(571);
+      expect(result.dimensions.width).toBeGreaterThanOrEqual(565);
+      expect(result.dimensions.height).toBeLessThanOrEqual(351);
+      expect(result.dimensions.height).toBeGreaterThanOrEqual(345);
+
+      const crop = result.appliedEnhancements.find((e) => e.type === 'crop');
+      expect(crop?.parameters?.width).toBe(result.dimensions.width);
+      expect(crop?.parameters?.height).toBe(result.dimensions.height);
+    });
+
+    test('does not crop after a right-angle rotation', async () => {
+      const result = await enhancePhoto(await solidGrey(), { rotation: 180 });
+
+      expect(result.dimensions).toEqual({ width: 600, height: 400 });
+      expect(result.appliedEnhancements.find((e) => e.type === 'crop')).toBeUndefined();
+    });
+  });
+});
+
+describe('inscribedRectangle', () => {
+  test('returns the full size at 0 degrees', () => {
+    const { width, height } = inscribedRectangle(600, 400, 0);
+
+    expect(width).toBeCloseTo(600, 6);
+    expect(height).toBeCloseTo(400, 6);
+  });
+
+  test('is the same for clockwise and anticlockwise rotation', () => {
+    expect(inscribedRectangle(600, 400, -5)).toEqual(inscribedRectangle(600, 400, 5));
+  });
+
+  test('swaps with the sides for a portrait image', () => {
+    const landscape = inscribedRectangle(600, 400, 5);
+    const portrait = inscribedRectangle(400, 600, 5);
+
+    expect(portrait.width).toBeCloseTo(landscape.height, 6);
+    expect(portrait.height).toBeCloseTo(landscape.width, 6);
+  });
+
+  test('fits inside the rotated rectangle at a steep angle', () => {
+    // 1000x100 at 30 degrees: the short side limits the crop to
+    // 50/sin(30) x 50/cos(30).
+    const landscape = inscribedRectangle(1000, 100, 30);
+    expect(landscape.width).toBeCloseTo(100, 6);
+    expect(landscape.height).toBeCloseTo(50 / Math.cos(Math.PI / 6), 6);
+
+    const portrait = inscribedRectangle(100, 1000, 30);
+    expect(portrait.width).toBeCloseTo(landscape.height, 6);
+    expect(portrait.height).toBeCloseTo(landscape.width, 6);
+  });
 });
 
 describe('Enhancement presets', () => {
@@ -286,5 +373,65 @@ describe('Performance and efficiency', () => {
 
     expect(result.buffer).toBeInstanceOf(Buffer);
     expect(duration).toBeLessThan(3000); // Should complete within 3 seconds
+  });
+});
+
+describe('PNG archival copy', () => {
+  // Gaussian noise: JPEG cannot reproduce it exactly, so a PNG made from the
+  // JPEG would not match the source pixels.
+  let noisyPngBuffer: Buffer;
+
+  const rawPixels = (image: Buffer) => sharp(image).raw().toBuffer();
+
+  beforeAll(async () => {
+    noisyPngBuffer = await sharp({
+      create: {
+        width: 64,
+        height: 48,
+        channels: 3,
+        background: { r: 0, g: 0, b: 0 },
+        noise: { type: 'gaussian', mean: 128, sigma: 40 },
+      },
+    })
+      .png()
+      .toBuffer();
+  });
+
+  test('returns no archival buffer unless asked', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, PRESET_STANDARD);
+
+    expect(result.archivalBuffer).toBeUndefined();
+  });
+
+  test('returns a PNG with the dimensions of the JPEG when archivalPng is set', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, { ...PRESET_STANDARD, archivalPng: true });
+
+    expect(result.archivalBuffer).toBeInstanceOf(Buffer);
+    const png = await sharp(result.archivalBuffer).metadata();
+    const jpeg = await sharp(result.buffer).metadata();
+    expect(png.format).toBe('png');
+    expect(jpeg.format).toBe('jpeg');
+    expect(png.width).toBe(jpeg.width);
+    expect(png.height).toBe(jpeg.height);
+    expect(result.outputFormat).toBe('jpeg');
+  });
+
+  test('the PNG holds the pipeline output exactly, not a decode of the JPEG', async () => {
+    // No enhancement steps, so the pipeline output is the input pixels.
+    const result = await enhancePhoto(noisyPngBuffer, { archivalPng: true });
+    const archival = result.archivalBuffer;
+    if (!archival) throw new Error('expected an archival buffer');
+
+    const source = await rawPixels(noisyPngBuffer);
+    expect((await rawPixels(archival)).equals(source)).toBe(true);
+    expect((await rawPixels(result.buffer)).equals(source)).toBe(false);
+  });
+
+  test('the PNG includes the enhancement steps', async () => {
+    const result = await enhancePhoto(noisyPngBuffer, { rotation: 90, archivalPng: true });
+
+    const png = await sharp(result.archivalBuffer).metadata();
+    expect(png.width).toBe(48);
+    expect(png.height).toBe(64);
   });
 });

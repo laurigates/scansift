@@ -61,6 +61,15 @@ export const SERVER = {
 // Maximum photos per batch
 export const MAX_PHOTOS_PER_BATCH = 4;
 
+// Front/back pairing parameters
+export const PAIRING_CONFIG = {
+  /**
+   * Largest shift of a photo's centre between the front and back scan that
+   * still pairs, per axis, as a fraction of the scan width/height (FR-3.2)
+   */
+  POSITION_TOLERANCE: 0.1,
+} as const;
+
 // Scan timeouts
 export const TIMEOUTS = {
   /** Default scan timeout in milliseconds (2 minutes) */

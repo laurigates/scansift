@@ -304,4 +304,201 @@ describe('pairPhotos', () => {
       }
     });
   });
+
+  describe('Position tolerance (FR-3.2)', () => {
+    // A 1000x1000 scan keeps the arithmetic readable: 10 px is 1% of the scan.
+    const SCAN = { width: 1000, height: 1000 };
+    const dimensions = { frontDimensions: SCAN, backDimensions: SCAN };
+
+    // A 200x200 photo centred on (cx, cy), labelled with the quadrant the
+    // detector would give it (centre versus the scan midpoint).
+    function photoAt(cx: number, cy: number, label: string, scan = SCAN): CroppedPhoto {
+      const vertical = cy < scan.height / 2 ? 'top' : 'bottom';
+      const horizontal = cx < scan.width / 2 ? 'left' : 'right';
+      const bounds = { x: cx - 100, y: cy - 100, width: 200, height: 200 };
+      return {
+        image: Buffer.from(label),
+        position: `${vertical}-${horizontal}` as GridPosition,
+        bounds,
+        originalBounds: bounds,
+      };
+    }
+
+    test('pairs a back shifted 8% horizontally across the midline', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(530, 250, 'back');
+      expect(front.position).toBe('top-left');
+      expect(back.position).toBe('top-right');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs).toHaveLength(1);
+      expect(result.pairs[0]?.position).toBe('top-left');
+      expect(result.pairs[0]?.back).toBe(back);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('pairs a back shifted 8% vertically across the midline', () => {
+      const front = photoAt(250, 450, 'front');
+      const back = photoAt(250, 530, 'back');
+      expect(back.position).toBe('bottom-left');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs[0]?.back).toBe(back);
+    });
+
+    test('pairs a back shifted exactly 10%', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(550, 250, 'back');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs[0]?.back).toBe(back);
+    });
+
+    test('does not pair a back shifted 15% into another quadrant', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(600, 250, 'back');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs).toHaveLength(1);
+      expect(result.pairs[0]?.back).toBeUndefined();
+      expect(result.warnings.some((w) => w.includes('Extra') && w.includes('top-right'))).toBe(
+        true,
+      );
+    });
+
+    test('does not pair when only one axis is within tolerance', () => {
+      const front = photoAt(450, 450, 'front');
+      const back = photoAt(530, 600, 'back');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs[0]?.back).toBeUndefined();
+    });
+
+    test('two backs in one quadrant each pair with their nearest front', () => {
+      const frontLeft = photoAt(450, 250, 'front-left');
+      const frontRight = photoAt(750, 250, 'front-right');
+      // The left photo drifted 8% over the midline, so both backs are top-right.
+      const backLeft = photoAt(530, 250, 'back-left');
+      const backRight = photoAt(760, 250, 'back-right');
+      expect(backLeft.position).toBe('top-right');
+      expect(backRight.position).toBe('top-right');
+
+      // backRight is listed first: a first-in-quadrant match would hand it to
+      // frontRight and drop backLeft.
+      const result = pairPhotos([frontLeft, frontRight], [backRight, backLeft], dimensions);
+
+      expect(result.pairs).toHaveLength(2);
+      expect(result.pairs[0]?.front).toBe(frontLeft);
+      expect(result.pairs[0]?.back).toBe(backLeft);
+      expect(result.pairs[1]?.front).toBe(frontRight);
+      expect(result.pairs[1]?.back).toBe(backRight);
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('a back within tolerance of two fronts goes to the nearer one', () => {
+      const frontA = photoAt(420, 250, 'front-a');
+      const frontB = photoAt(580, 250, 'front-b');
+      // 9% from frontA, 7% from frontB.
+      const back = photoAt(510, 250, 'back');
+
+      const result = pairPhotos([frontA, frontB], [back], dimensions);
+
+      expect(result.pairs[0]?.front).toBe(frontA);
+      expect(result.pairs[0]?.back).toBeUndefined();
+      expect(result.pairs[1]?.front).toBe(frontB);
+      expect(result.pairs[1]?.back).toBe(back);
+    });
+
+    test('normalises each side by its own scan dimensions', () => {
+      const backScan = { width: 2000, height: 2000 };
+      const front = photoAt(450, 250, 'front');
+      // 1060/2000 = 0.53 against the front's 0.45: an 8% shift.
+      const back = photoAt(1060, 500, 'back', backScan);
+      expect(back.position).toBe('top-right');
+
+      const result = pairPhotos([front], [back], {
+        frontDimensions: SCAN,
+        backDimensions: backScan,
+      });
+
+      expect(result.pairs[0]?.back).toBe(back);
+    });
+
+    test('honours a custom tolerance', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(530, 250, 'back');
+
+      const result = pairPhotos([front], [back], { ...dimensions, tolerance: 0.05 });
+
+      expect(result.pairs[0]?.back).toBeUndefined();
+    });
+
+    test('identical positions pair as before, with no warnings', () => {
+      const centres: Array<[number, number]> = [
+        [250, 250],
+        [750, 250],
+        [250, 750],
+        [750, 750],
+      ];
+      const fronts = centres.map(([x, y]) => photoAt(x, y, 'front'));
+      const backs = centres.map(([x, y]) => photoAt(x, y, 'back'));
+
+      const result = pairPhotos(fronts, backs, dimensions);
+
+      expect(result.pairs.map((p) => p.position)).toEqual([
+        'top-left',
+        'top-right',
+        'bottom-left',
+        'bottom-right',
+      ]);
+      result.pairs.forEach((pair, i) => {
+        expect(pair.back).toBe(backs[i]);
+      });
+      expect(result.warnings).toHaveLength(0);
+    });
+
+    test('a missing back still yields a front-only pair (FR-3.3)', () => {
+      const fronts = [photoAt(250, 250, 'front-1'), photoAt(750, 250, 'front-2')];
+      const backs = [photoAt(250, 250, 'back-1')];
+
+      const result = pairPhotos(fronts, backs, dimensions);
+
+      expect(result.pairs).toHaveLength(2);
+      expect(result.pairs[0]?.back).toBe(backs[0]);
+      expect(result.pairs[1]?.back).toBeUndefined();
+    });
+
+    test('a back in the same quadrant beyond tolerance still pairs by grid position', () => {
+      const front = photoAt(150, 150, 'front');
+      const back = photoAt(350, 150, 'back');
+      expect(back.position).toBe('top-left');
+
+      const result = pairPhotos([front], [back], dimensions);
+
+      expect(result.pairs[0]?.back).toBe(back);
+    });
+
+    test('without scan dimensions a back in another quadrant does not pair', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(530, 250, 'back');
+
+      const result = pairPhotos([front], [back]);
+
+      expect(result.pairs[0]?.back).toBeUndefined();
+    });
+
+    test('with dimensions for only one side, falls back to grid position', () => {
+      const front = photoAt(450, 250, 'front');
+      const back = photoAt(530, 250, 'back');
+
+      const result = pairPhotos([front], [back], { frontDimensions: SCAN });
+
+      expect(result.pairs[0]?.back).toBeUndefined();
+    });
+  });
 });
