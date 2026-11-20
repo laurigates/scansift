@@ -16,7 +16,7 @@
  * @module cropper
  */
 
-import sharp from 'sharp';
+import sharp, { type Metadata, type Sharp } from 'sharp';
 import type { CroppedPhoto, DetectedPhoto } from '../../shared/types';
 
 /**
@@ -120,7 +120,7 @@ export async function cropPhoto(imageBuffer: Buffer, bounds: Bounds): Promise<Bu
   validateImageBuffer(imageBuffer);
 
   // Load image and get dimensions
-  let sharpInstance: sharp.Sharp;
+  let sharpInstance: Sharp;
   try {
     sharpInstance = sharp(imageBuffer);
   } catch (error) {
@@ -184,7 +184,7 @@ export async function cropAllPhotos(
   }
 
   // Get image dimensions for validation
-  let metadata: sharp.Metadata;
+  let metadata: Metadata;
   try {
     metadata = await sharp(imageBuffer).metadata();
   } catch (error) {
