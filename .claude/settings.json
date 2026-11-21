@@ -33,7 +33,8 @@
       "source": {
         "source": "github",
         "repo": "laurigates/claude-plugins"
-      }
+      },
+      "autoUpdate": true
     }
   },
   "enabledPlugins": {
@@ -52,5 +53,10 @@
     "blueprint-plugin@laurigates-claude-plugins": true,
     "agents-plugin@laurigates-claude-plugins": true,
     "accessibility-plugin@laurigates-claude-plugins": true
-  }
+  },
+  "enabledMcpjsonServers": [
+    "pal",
+    "context7",
+    "sequential-thinking"
+  ]
 }
