@@ -60,6 +60,8 @@ export interface DetectedPhoto {
     height: number;
   };
   confidence: number;
+  /** Lossless PNG of the enhanced image; present only when archival is on. */
+  archivalImage?: Buffer;
 }
 
 // Photo metadata extracted from OCR
@@ -102,11 +104,19 @@ export type ClientEvent =
   | { type: 'scan:start'; scanType: 'front' | 'back' }
   | { type: 'scan:cancel'; scanId: string };
 
+// Pixel dimensions of a scanned image
+export interface ImageDimensions {
+  width: number;
+  height: number;
+}
+
 // Photo detection result
 export interface DetectionResult {
   photos: DetectedPhoto[];
   processingTime: number; // milliseconds
   warnings?: string[];
+  /** Dimensions of the scan the photo bounds are measured in */
+  imageDimensions?: ImageDimensions;
 }
 
 // Image enhancement options
@@ -116,11 +126,13 @@ export interface EnhancementOptions {
   gamma?: number;
   rotation?: number; // Degrees to rotate (positive = clockwise)
   whiteBalance?: boolean;
+  /** Also return a lossless PNG of the enhanced image (EnhancementResult.archivalBuffer). */
+  archivalPng?: boolean;
 }
 
 // Applied enhancement details for tracking
 export interface AppliedEnhancement {
-  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'whiteBalance' | 'format';
+  type: 'sharpen' | 'normalize' | 'gamma' | 'rotation' | 'crop' | 'whiteBalance' | 'format';
   description: string;
   parameters?: Record<string, number | boolean | string>;
 }
@@ -128,6 +140,11 @@ export interface AppliedEnhancement {
 // Result of image enhancement processing
 export interface EnhancementResult {
   buffer: Buffer;
+  /**
+   * Lossless PNG encoded from the same pipeline output as `buffer`, before
+   * JPEG compression. Present only when `archivalPng` was requested.
+   */
+  archivalBuffer?: Buffer;
   appliedEnhancements: AppliedEnhancement[];
   processingTime: number; // milliseconds
   inputFormat?: string;
@@ -145,6 +162,8 @@ export interface ScanResult {
   rawImagePath: string;
   timestamp: Date;
   detectedPhotos: DetectedPhoto[];
+  /** Dimensions of the raw scan, when the detector reported them */
+  imageDimensions?: ImageDimensions;
 }
 
 // Batch result from completing a batch
@@ -174,6 +193,8 @@ export interface CroppedPhoto {
   };
   enhanced?: boolean;
   metadata?: PhotoMetadata;
+  /** Lossless PNG of the enhanced image; present only when archival is on. */
+  archivalImage?: Buffer;
 }
 
 // Paired photo (front with optional back)
