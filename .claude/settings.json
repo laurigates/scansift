@@ -54,9 +54,5 @@
     "agents-plugin@laurigates-claude-plugins": true,
     "accessibility-plugin@laurigates-claude-plugins": true
   },
-  "enabledMcpjsonServers": [
-    "pal",
-    "context7",
-    "sequential-thinking"
-  ]
+  "enabledMcpjsonServers": ["pal", "context7", "sequential-thinking"]
 }
