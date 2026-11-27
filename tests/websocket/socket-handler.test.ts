@@ -80,6 +80,7 @@ class MockOrchestrator extends EventEmitter {
   getFrontScanResult = mock(() => null as null | { detectedPhotos: unknown[] });
   isScannerReady = mock(() => Promise.resolve(true));
   reset = mock(() => undefined);
+  cancelScan = mock((_scanId: string) => Promise.resolve(true));
 }
 
 // ---------------------------------------------------------------------------
@@ -309,9 +310,47 @@ describe('socket handler', () => {
       expect(client.socket.connected).toBe(true);
     });
 
-    test.todo(
-      'scan:cancel currently logs only — actual cancellation is unimplemented (TODO in handler)',
-    );
+    test('scan:cancel invokes orchestrator.cancelScan with the scanId', async () => {
+      const client = await connectClient(harness.port);
+      clients.push(client);
+      await client.next('state:changed');
+
+      client.socket.emit('scan:cancel', { scanId: 'sid-1' });
+
+      await waitFor(() => harness.orchestrator.cancelScan.mock.calls.length > 0);
+      expect(harness.orchestrator.cancelScan).toHaveBeenCalledTimes(1);
+      expect(harness.orchestrator.cancelScan).toHaveBeenCalledWith('sid-1');
+    });
+
+    test('scan:cancel for an unknown scanId keeps the connection open', async () => {
+      harness.orchestrator.cancelScan.mockImplementation(() => Promise.resolve(false));
+
+      const client = await connectClient(harness.port);
+      clients.push(client);
+      await client.next('state:changed');
+
+      client.socket.emit('scan:cancel', { scanId: 'unknown' });
+
+      await waitFor(() => harness.orchestrator.cancelScan.mock.calls.length > 0);
+      expect(client.socket.connected).toBe(true);
+    });
+
+    test('scan:cancel swallows orchestrator errors', async () => {
+      harness.orchestrator.cancelScan.mockImplementation(() => Promise.reject(new Error('boom')));
+
+      const client = await connectClient(harness.port);
+      clients.push(client);
+      await client.next('state:changed');
+
+      client.socket.emit('scan:cancel', { scanId: 'sid-1' });
+
+      await waitFor(() => harness.orchestrator.cancelScan.mock.calls.length > 0);
+      // A later event still reaches the handler, so the rejection did not
+      // take the server down.
+      client.socket.emit('scan:start', { scanType: 'front' });
+      await waitFor(() => harness.orchestrator.startFrontScan.mock.calls.length > 0);
+      expect(client.socket.connected).toBe(true);
+    });
   });
 
   describe('orchestrator → all clients broadcasts', () => {

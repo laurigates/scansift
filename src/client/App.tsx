@@ -15,6 +15,7 @@ export const App = () => {
   const showStatus = state.status !== 'idle';
   const showProgress = state.status === 'processing_fronts' || state.status === 'processing_backs';
   const progress = showProgress && 'progress' in state ? state.progress : 0;
+  const hasPreviews = previews.some(Boolean);
 
   return (
     <div className="min-h-screen bg-gray-50">
@@ -68,8 +69,8 @@ export const App = () => {
 
               {/* Photo Previews for ready_for_backs or after processing_fronts */}
               {(state.status === 'ready_for_backs' ||
-                (state.status === 'processing_fronts' && previews.length > 0)) &&
-                previews.length > 0 && (
+                (state.status === 'processing_fronts' && hasPreviews)) &&
+                hasPreviews && (
                   <div className="mt-4">
                     <PhotoPreview
                       photos={previews}

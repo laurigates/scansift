@@ -14,7 +14,8 @@ High-performance image enhancement pipeline for scanned photos using Sharp.
 - Contrast/brightness normalization
 - Sharpening filters for slightly blurry scans
 - Gamma correction for faded photos
-- Rotation/deskew support
+- Rotation by a given angle; after a rotation that is not a multiple of 90°, the
+  output is cropped to the rectangle inscribed in the rotated image
 - High-quality JPEG output (95% quality)
 
 **Presets:**
@@ -38,6 +39,13 @@ const result = await enhancePhoto(imageBuffer, PRESET_STANDARD);
 console.log(`Enhanced in ${result.processingTime}ms`);
 console.log(`Applied ${result.appliedEnhancements.length} enhancements`);
 ```
+
+### `deskew.ts`
+
+`estimateSkewAngle(image)` returns the angle, in degrees, to rotate a crop by to
+straighten it (positive is clockwise, as in sharp's `rotate()`), or 0 when it
+has no confident estimate. It searches ±10° on a 400px greyscale copy. The scan
+orchestrator passes estimates of 0.5° or more to `enhancePhoto` as `rotation`.
 
 ## Testing
 
